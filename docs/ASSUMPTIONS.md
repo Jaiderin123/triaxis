@@ -121,9 +121,9 @@ A1 to A4 come from `ARCHITECTURE.md` section 6.2. A5 onward were added while pre
 ## A18. Authentication scope
 
 - **Ambiguity:** "basic authentication (JWT or API key)" without details.
-- **Decision:** JWT RS256 from a separate `auth-service` with users in configuration, short-lived tokens, no refresh tokens, no registration. Production would use Entra ID or Keycloak.
-- **Why:** shows the validation path through JWKS without an external identity provider.
-- **Impact if wrong:** none for the evaluation; the resource servers do not change when the issuer changes.
+- **Decision:** JWT RS256 from a separate `auth-service`, short-lived (15 minutes), no refresh tokens, no registration. Request fields are `username` and `password`; the response follows OAuth2 names (`access_token`, `token_type`, `expires_in`) because authentication is not part of the Spanish domain contract. Bad credentials return 401 with a generic message. Users come from configuration with BCrypt hashes; the repository only holds demonstration users for the local profile. The signing key comes from `JWT_PRIVATE_KEY`, and a key is generated only when `auth.jwt.generate-key-if-missing=true`. `auth-service` does not depend on `triaxis-security`.
+- **Why:** shows the validation path through JWKS without an external identity provider, and avoids shared secrets. See ADR 0003.
+- **Impact if wrong:** none for the evaluation; the resource servers do not change when the issuer changes. Switching to Spanish field names is a DTO change.
 
 ## A19. Urgency view counts
 

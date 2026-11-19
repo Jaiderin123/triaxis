@@ -10,3 +10,7 @@ management:
     health:
       probes:
         enabled: true
+
+triaxis:
+  security:
+    jwks-uri: ${AUTH_JWKS_URI:http://localhost:8083/.well-known/jwks.json}
