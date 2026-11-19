@@ -166,3 +166,11 @@ A1 to A4 come from `ARCHITECTURE.md` section 6.2. A5 onward were added while pre
 - **Decision:** `POST` returns 201 with `id`, `nivel`, `slaMinutos`, `estado`, `fechaRegistro` and a `Location` header. `GET` returns the full patient (request fields plus `nivel`, `slaMinutos`, `estado`, `escalado`, `fechaRegistro`, `fechaCambioEstado` and `tiempoEnEstadoSegundos`). `PATCH` returns 200 with the same body as `GET`. Field names stay in Spanish, so the JSON never mixes languages. Error bodies are standard `ProblemDetail` (English text); validation errors add an `errores` list with `campo` (the external field name) and `mensaje`.
 - **Why:** consistent contract, and the time in the current state is exact enough to test.
 - **Impact if wrong:** a client expecting 204 on `PATCH` ignores the body; renaming is a DTO change.
+
+## A26. Correlation id of a request
+
+- **Ambiguity:** the specification asks for structured logs with a correlation id but not for where the id comes from.
+- **Decision:** the id is taken from the `X-Correlation-Id` header when it is safe (letters, digits, dot, dash and underscore, up to 64 characters); otherwise a new one is generated. It is echoed in the response, stored with each outbox event and sent as the `correlationId` header of the Kafka message.
+- **Why:** callers can trace a request across services, and an unsafe value cannot inject text into logs or headers.
+- **Impact if wrong:** an id that does not match the pattern is replaced, which only affects tracing.
+

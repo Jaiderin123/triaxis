@@ -3,7 +3,7 @@
 Architecture and design decisions for **Triaxis**, a digital triage system with a clinical assistant.
 Companion documents: [`TECH_STACK.md`](TECH_STACK.md) (stack and versions) and [`adr/`](adr/) (decision records).
 
-Status: **proposal**, to be refined while implementing. Items under "Open decisions" can still change.
+Status: **living document**. It describes the system as designed and built; when a design decision changes it is updated in the same pull request that changes the code, and the decision is recorded in an ADR (see section 14 for their status). `docs/PLAN.md` tracks the progress.
 
 ---
 
@@ -148,8 +148,8 @@ dev.triaxis.triage
 ├── application
 │   ├── port.in          RegisterPatientUseCase, ChangePatientStatusUseCase, GetPatientUseCase,
 │   │                    EscalateOverduePatientsUseCase, GetOperationReportUseCase
-│   ├── port.out         PatientRepository, AuditRepository, EventPublisher,
-│   │                    ReportQuery, AlertNotifier, ClockPort
+│   ├── port.out         PatientRepository, AuditRepository, EventPublisher, ClockPort,
+│   │                    IdGenerator, UnitOfWork, TriageMetrics  (later: ReportQuery, AlertNotifier)
 │   └── service          use case implementations
 ├── infrastructure
 │   ├── adapter.in
@@ -158,7 +158,7 @@ dev.triaxis.triage
 │   │   │   ├── handler      PatientHandler, ReportHandler
 │   │   │   ├── dto          request and response records (Spanish external names)
 │   │   │   ├── mapper       MapStruct: DTO <-> command and domain <-> response
-│   │   │   ├── validation   RequestValidator
+│   │   │   ├── validation   InvalidRequestException (JSON shape only; business validation is in the domain, ADR 0017)
 │   │   │   └── error        GlobalErrorHandler (WebExceptionHandler)
 │   │   ├── scheduler        EscalationScheduler
 │   │   └── messaging        EscalationAlertListener
@@ -224,7 +224,7 @@ Reactive rules:
 
 - `Patient` (id, full name, age, `VitalSigns`, chief complaint, level, SLA minutes, status, escalated flag, timestamps).
 - `VitalSigns`: heart rate, systolic, diastolic, SpO2, temperature, pain, GCS.
-- `TriageLevel`: `CRITICAL`, `URGENT`, `URGENT_2`, `NOT_URGENT`, `NOT_URGENT_2`, each mapped to its external value (`CRITICO`, `URGENTE`, `URGENTE_2`, `NO_URGENTE`, `NO_URGENTE_2`).
+- `TriageLevel`: `CRITICAL`, `URGENT`, `URGENT_2`, `NOT_URGENT`, `NOT_URGENT_2`, with no external value in the domain; the mappers convert them to `CRITICO`, `URGENTE`, `URGENTE_2`, `NO_URGENTE`, `NO_URGENTE_2` (ADR 0015).
 - `PatientStatus`: `REGISTERED`, `IN_CONSULTATION`, `DISCHARGED` (external `REGISTRADO`, `EN_CONSULTA`, `ALTA`).
 
 ### 6.2 Classification (RN-01)
@@ -334,7 +334,7 @@ Every state change writes **patient row, audit entry and outbox row in one trans
 
 Why: publishing to Kafka directly after the database commit can lose the event (or the other way around). The outbox removes that dual-write problem.
 
-> **Fallback if time is short:** publish after commit with retry, and document the trade-off in the ADR. The outbox is the first item to cut.
+Implemented in full (ADR 0005), including the correlation id column and the metrics `triage.outbox.pending`, `triage.outbox.published` and `triage.outbox.failures`; the fallback of publishing after the commit was not needed. The relay loop is configurable and is switched off in tests, which call it explicitly.
 
 ### 6.6 Escalation (RF-03, RN-03)
 
@@ -364,7 +364,7 @@ Why this satisfies RN-03:
 - The `WHERE` makes a second attempt a no-op (already escalated, or no longer `REGISTERED`), so there is no duplicate event or audit row.
 - A patient who entered consultation or was discharged is never selected.
 - `SKIP LOCKED` makes it safe with several replicas.
-- A concurrent `PATCH` to `IN_CONSULTATION` and the scheduler cannot both win, because both are conditional updates.
+- A concurrent `PATCH` to `IN_CONSULTATION` and the scheduler are ordered by the row lock: if the `PATCH` commits first, the patient is no longer `REGISTERED` and is never escalated; if the escalation commits first, the `PATCH` then proceeds, because an escalated patient may still enter consultation. An escalation entry therefore never follows a consultation or discharge entry in the audit.
 
 ```mermaid
 sequenceDiagram
@@ -440,7 +440,9 @@ External names are Spanish, as specified.
 
 Request body fields: `nombreCompleto`, `edad`, `frecuenciaCardiaca`, `presionSistolica`, `presionDiastolica`, `spo2`, `temperatura`, `dolor`, `gcs`, `quejaPrincipal`. Because the exact field names are not given, common variants are accepted with `@JsonAlias` (for example `nombre`, `fc`, `heartRate`), and the choice is documented in the README.
 
-All errors use RFC 7807 `ProblemDetail`.
+`POST` answers 201 with a `Location` header. `PATCH` answers 200 with the same body as `GET`. `GET` returns the registration data, `nivel`, `slaMinutos`, `estado`, `escalado`, `fechaRegistro`, `fechaCambioEstado` and `tiempoEnEstadoSegundos`.
+
+All errors use RFC 7807 `ProblemDetail`. Validation errors (400) add `errores`, a list of `campo` (the external field name) and `mensaje`. Transition errors (409) use the external status names. Integers are parsed strictly (a decimal or a string is a 400 naming the field). See ADR 0012, ADR 0017 and ASSUMPTIONS A25.
 
 ---
 
@@ -631,31 +633,35 @@ Minimum coverage required: classification E1 to E6, valid and invalid transition
 | # | Decision | Current proposal | Alternative |
 |---|---|---|---|
 | 1 | Where and how alerts are sent (RF-06) | Kafka-driven notifier inside `triage-service`, webhook plus log adapter | Dedicated `notification-service`, email, SSE |
-| 2 | Event publication | Transactional outbox | Publish after commit with retry (faster to build) |
+| 2 | Event publication | **Decided:** transactional outbox (ADR 0005) | Publish after commit with retry (faster to build) |
 | 3 | Azure compute | AKS single node with in-cluster PostgreSQL, Kafka and Redis | Azure Container Apps, managed services |
-| 4 | Level 5 complaint matching | Normalized exact match | Contains match |
+| 4 | Level 5 complaint matching | **Decided:** normalized exact match (ASSUMPTIONS A3) | Contains match |
 
 ---
 
 ## 14. ADR plan
 
-| ADR | Decision |
-|---|---|
-| 0001 | Spring Kafka instead of Reactor Kafka (discontinued) |
-| 0002 | Custom R2DBC repository for vectors instead of `PgVectorStore` (blocking JDBC) |
-| 0003 | Separate identity service with RS256 and JWKS |
-| 0004 | Degraded mode: circuit breaker, 503, and Triage independence |
-| 0005 | Transactional outbox for event publication |
-| 0006 | Atomic escalation with conditional update and `SKIP LOCKED` |
-| 0007 | Anti-hallucination strategy (retrieval gate, validated citations) |
-| 0008 | Gemini for LLM and embeddings; Ollama and DeepSeek discarded |
-| 0009 | Spring Boot 3.5 / Spring AI 1.1 out of OSS support, chosen on purpose |
-| 0010 | Deployment strategy and cost control on Azure |
-| 0011 | Alert channel for escalated patients |
-| 0012 | Functional endpoints (`RouterFunction`) instead of annotated controllers |
-| 0013 | Who may change a patient's state (`NURSE` and `DOCTOR`), an ambiguity of the specification |
-| 0014 | Clinical audit trail: append-only table written in the same transaction, with the actor |
-| 0015 | MapStruct for boundary mappers |
+Status `written` means the file exists in `docs/adr/` (checked by `scripts/check-docs.sh`). ADRs are written when the decision is made, in the pull request that implements it.
+
+| ADR | Decision | Status |
+|---|---|---|
+| 0001 | Spring Kafka instead of Reactor Kafka (discontinued) | written |
+| 0002 | Custom R2DBC repository for vectors instead of `PgVectorStore` (blocking JDBC) | pending (assistant) |
+| 0003 | Separate identity service with RS256 and JWKS | written |
+| 0004 | Degraded mode: circuit breaker, 503, and Triage independence | pending (assistant) |
+| 0005 | Transactional outbox for event publication | written |
+| 0006 | Atomic escalation with conditional update and `SKIP LOCKED` | pending (phase 4) |
+| 0007 | Anti-hallucination strategy (retrieval gate, validated citations) | pending (assistant) |
+| 0008 | Gemini for LLM and embeddings; Ollama and DeepSeek discarded | pending (assistant) |
+| 0009 | Spring Boot 3.5 / Spring AI 1.1 out of OSS support, chosen on purpose | written |
+| 0010 | Deployment strategy and cost control on Azure | pending (deployment) |
+| 0011 | Alert channel for escalated patients | pending (alerts) |
+| 0012 | Functional endpoints (`RouterFunction`) instead of annotated controllers | written |
+| 0013 | Who may change a patient's state (`NURSE` and `DOCTOR`), an ambiguity of the specification | written |
+| 0014 | Clinical audit trail: append-only table written in the same transaction, with the actor | written |
+| 0015 | MapStruct for boundary mappers | written |
+| 0016 | Hexagonal architecture enforced by ArchUnit and BlockHound tests | written |
+| 0017 | Business validation lives in the domain | written |
 
 At least two are required; the more concrete ones (0001, 0002, 0006, 0007) are the priority.
 

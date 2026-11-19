@@ -1,7 +1,7 @@
 # Triaxis: Technology Stack
 
 Reference document for **Triaxis**, a digital triage system with a clinical assistant (Triage service, Clinical Assistant service and Auth service).
-Items marked **(confirm)** must be checked against Maven Central / Docker Hub when the project is created.
+Versions are confirmed against Maven Central and Docker Hub as they are adopted; an item still marked **(confirm)** has not been checked yet.
 
 ## 0. Naming
 
@@ -19,10 +19,10 @@ The name must be checked on GitHub and Google before publishing, to avoid clashi
 
 | Area | Choice | Notes |
 |---|---|---|
-| Language | Java 21 (Temurin, latest 21.0.x) **(confirm patch)** | LTS. Spring Boot 3.5 supports Java 17 to 25 |
+| Language | Java 21 (Temurin 21.0.10, confirmed) | LTS. Spring Boot 3.5 supports Java 17 to 25 |
 | Framework | Spring Boot **3.5.16** | Last OSS release of the 3.5 line. OSS support ended in June 2026 (see ADR) |
 | Reactive stack | Spring WebFlux, Project Reactor | No blocking calls on the event loop |
-| Build | Gradle **8.14.x** (wrapper), Groovy DSL, multi-module **(confirm patch)** | Version catalog in `gradle/libs.versions.toml` |
+| Build | Gradle **8.14.7** (wrapper, confirmed), Groovy DSL, multi-module | Version catalog in `gradle/libs.versions.toml` |
 
 ## 2. Modules
 
@@ -38,18 +38,18 @@ The name must be checked on GitHub and Google before publishing, to avoid clashi
 
 | Area | Choice | Notes |
 |---|---|---|
-| Relational database | PostgreSQL 16 or 17 **(confirm tag)** | Must match a version supported by the Azure target |
+| Relational database | PostgreSQL 16 (`pgvector/pgvector:pg16` locally, `postgres:16-alpine` in tests; confirmed) | Must match a version supported by the Azure target |
 | Vector search | pgvector extension (`pgvector/pgvector` image) | Custom R2DBC repository, no `PgVectorStore` |
 | Database access | Spring Data R2DBC, `r2dbc-postgresql` | Schema created with init scripts (no Flyway/JDBC) |
-| Messaging | Apache Kafka, KRaft mode **(confirm tag)** | Topic: `triaje.eventos` |
+| Messaging | Apache Kafka 3.9, KRaft mode (`apache/kafka:3.9.1`, confirmed) | Topic: `triaje.eventos` |
 | Kafka client | Spring for Apache Kafka | Async `@KafkaListener` returning `Mono`, manual acknowledgment |
-| Cache / read model | Redis 7.x **(confirm tag)** via Spring Data Redis Reactive | Urgency view rebuilt from events |
+| Cache / read model | Redis 7.4 (`redis:7.4-alpine`, confirmed) via Spring Data Redis Reactive | Urgency view rebuilt from events |
 
 ## 4. AI
 
 | Area | Choice | Notes |
 |---|---|---|
-| Framework | Spring AI **1.1.x** (latest available) **(confirm exact patch)** | Spring AI 1.1 supports Boot 3.4 and 3.5. Spring AI 2.x requires Boot 4 |
+| Framework | Spring AI **1.1.8** (latest 1.1 release, confirmed) | Spring AI 1.1 supports Boot 3.4 and 3.5. Spring AI 2.x requires Boot 4 |
 | LLM and embeddings | Google Gemini (chat and embeddings) | API key from an environment variable |
 | Local / tests | `mock` profile (deterministic fake LLM and embeddings) | Lets anyone run the system without an API key |
 | Retrieval | Cosine distance in pgvector with a similarity threshold | Below the threshold: fixed "no protocol available" answer, **no LLM call** |
@@ -122,7 +122,7 @@ BlockHound on JDK 13+ may need the JVM flag `-XX:+AllowRedefinitionToAddDeleteMe
 
 ## 11. Open items
 
-- [ ] Confirm exact versions marked **(confirm)**.
+- [x] Confirm exact versions (done as they were adopted; recheck image tags before the deployment).
 - [ ] Choose Azure Container Apps or AKS, and how Kafka, PostgreSQL and Redis run there.
 - [ ] Choose the alert channel and format for escalations.
 - [ ] Calibrate the similarity threshold with the Gemini embedding model.

@@ -11,7 +11,7 @@ Triaxis is a reactive digital triage system with a clinical assistant. Nurses re
 | Phased checklist (what to do next) | `docs/PLAN.md` |
 | Assumptions and ambiguities | `docs/ASSUMPTIONS.md` |
 | Git and commit conventions | `docs/GIT_WORKFLOW.md` |
-| Decision records | `docs/adr/` (README, template and ADRs 0001, 0003, 0005, 0013, 0014 and 0015 exist; the rest of the plan is in `ARCHITECTURE.md` section 14) |
+| Decision records | `docs/adr/` (README, template and ADRs 0001, 0003, 0005, 0009, 0012, 0013, 0014, 0015, 0016 and 0017 exist; the status of the rest is in `ARCHITECTURE.md` section 14) |
 | Original requirements (RF-xx, RN-xx), Spanish | `docs/private/ASSIGNMENT.md` (local only, git-ignored) |
 
 ## Modules
@@ -82,6 +82,18 @@ Security and hygiene
 5. When a task or phase finishes, add an entry to the progress log at the end of `docs/PLAN.md` (what, decisions, verification, PRs). Treat it as the living specification.
 6. Record any new ambiguity or decision in `docs/ASSUMPTIONS.md`; write an ADR for architecture-level decisions.
 
+## Documentation sync (part of the definition of done)
+
+The documents are a living specification. A task is not done until they match the code. Do this in the same pull request as the change, and run `scripts/check-docs.sh` before opening it.
+
+1. `docs/PLAN.md`: tick tasks, update the status table, add the progress log entry, refresh the "Where to resume" notes.
+2. `docs/ARCHITECTURE.md`: when the implementation differs from it, update it, but only to reflect a change the user approved; if the change was not approved, stop and ask (see below). Keep section 6, the API contract and section 14 (ADR status) accurate.
+3. ADRs: every design decision with alternatives gets an ADR, written when the decision is made, not at the end. Update the index in `docs/adr/README.md` and mark it as written in `ARCHITECTURE.md` section 14. A decision that changes an earlier one supersedes the old ADR instead of editing history.
+4. `docs/ASSUMPTIONS.md`: every ambiguity of the specification and every assumption taken.
+5. `docs/TECH_STACK.md` and `gradle/libs.versions.toml`: same versions; mark confirmed versions.
+6. `README.md` and this file: current state, run commands (mark which ones were verified), endpoints, rules.
+7. After planning a phase, record the approved decisions in `docs/PLAN.md` before writing code.
+
 ## Commands
 
 `./gradlew build` is verified (JDK 21, Docker running for the Testcontainers tests). Commands marked unverified have not been run by hand.
@@ -108,5 +120,5 @@ JaCoCo reports are produced after `test` (root `build.gradle`).
 
 - Anything that changes the external contract (paths, JSON fields, event names, state or level values).
 - Adding a dependency that is not in `TECH_STACK.md`, or adding a service or module.
-- Anything that contradicts `ARCHITECTURE.md`, `TECH_STACK.md` or the requirements specification.
+- Anything that contradicts `ARCHITECTURE.md`, `TECH_STACK.md` or the requirements specification. When the user approves such a change, update those documents and write or supersede the ADR in the same pull request.
 - Changes to the Azure plan or to anything that costs money.
