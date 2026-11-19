@@ -56,18 +56,24 @@ First commit: `chore: add multi-module skeleton and local infrastructure`
 
 **Goal:** tokens can be issued and validated by the other services.
 
+Decisions (approved): OAuth2 field names (`username`, `password`, `access_token`, `token_type`, `expires_in`); demonstration users `nurse` and `doctor` in the local profile with BCrypt hashes; the signing key is generated only with `auth.jwt.generate-key-if-missing=true`, otherwise `JWT_PRIVATE_KEY` is required; `auth-service` does not depend on `triaxis-security` (only a test-scope dependency for the integration test). See ADR 0003 and ASSUMPTIONS A18.
+
+Work is split into three pull requests.
+
 Tasks
-- [ ] `POST /auth/token` with users and roles (`NURSE`, `DOCTOR`) from configuration, passwords stored hashed
-- [ ] RS256 signing, 15-minute tokens with `sub`, `roles`, `iss`, `exp`; key from `JWT_PRIVATE_KEY`, generated with a warning only in development
-- [ ] `GET /.well-known/jwks.json`
-- [ ] `triaxis-security`: shared resource-server configuration with a lazy JWKS decoder and role extraction
-- [ ] Actuator probes public, everything else requires a JWT
+- [x] `triaxis-security`: auto-configuration with a lazy JWKS decoder (RS256, issuer and expiration checks), `roles` to `ROLE_*` converter, public health probes, `AuthorizationRulesCustomizer` hook for per-service rules (`feat/security-resource-server`)
+- [x] `triaxis-triage-service` and `triaxis-assistant-service` set `triaxis.security.jwks-uri` (`AUTH_JWKS_URI`, default `http://localhost:8083/.well-known/jwks.json`)
+- [ ] `POST /auth/token` with users and roles (`NURSE`, `DOCTOR`) from configuration, BCrypt hashes (`feat/auth-token-endpoint`)
+- [ ] RS256 signing, 15-minute tokens with `sub`, `roles`, `iss`, `iat`, `exp`, `jti` and `kid`; key from `JWT_PRIVATE_KEY`
+- [ ] `GET /.well-known/jwks.json` and an integration test where the decoder of `triaxis-security` validates a token issued by auth (`feat/auth-jwks`)
+- [ ] Auth security chain: only `/auth/token`, JWKS and health probes are public
+- [x] ADR 0003
 
 Modules: `triaxis-auth-service`, `triaxis-security`.
 
-Tests: token issue and rejection of bad credentials; JWKS exposes the matching public key; a resource-server test with `spring-security-test` for 401, 403 and 200.
+Tests: token issue and rejection of bad credentials; JWKS exposes the matching public key; expired token, wrong issuer, wrong key and tampered payload give 401; role rule gives 403; ArchUnit and context load.
 
-Definition of done: `./gradlew :triaxis-auth-service:test :triaxis-security:test`; manually, a token from `/auth/token` is accepted by triage.
+Definition of done: `./gradlew build`; the integration test validates an auth-issued token with the shared decoder. Checking a token against a real triage endpoint happens in phase 2, when triage has protected routes.
 
 First commit: `feat(auth): issue RS256 tokens and expose JWKS`
 
