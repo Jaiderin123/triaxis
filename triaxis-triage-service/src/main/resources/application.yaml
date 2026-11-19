@@ -4,6 +4,24 @@ server:
 spring:
   application:
     name: triaxis-triage-service
+  # Connection settings come from the environment (the local profile has development defaults).
+  r2dbc:
+    url: ${TRIAGE_DB_URL:}
+    username: ${TRIAGE_DB_USER:}
+    password: ${TRIAGE_DB_PASSWORD:}
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:db/schema.sql
+      # The whole script is sent as one statement, so the trigger function body is not split at its semicolons.
+      separator: "^^^ END OF SCRIPT ^^^"
+  jackson:
+    deserialization:
+      # Integers must not accept decimals (93.5 is rejected instead of silently truncated).
+      accept-float-as-int: false
+    mapper:
+      # No silent conversion of strings into numbers.
+      allow-coercion-of-scalars: false
 
 management:
   endpoint:
@@ -14,3 +32,18 @@ management:
 triaxis:
   security:
     jwks-uri: ${AUTH_JWKS_URI:http://localhost:8083/.well-known/jwks.json}
+
+triage:
+  sla:
+    minutes:
+      CRITICAL: 5
+      URGENT: 10
+      URGENT_2: 30
+      NOT_URGENT: 60
+      NOT_URGENT_2: 120
+  administrative-complaints:
+    - documentos
+    - recoleccion de resultados
+    - renovacion de recetario
+    - vacunacion
+    - seguimiento

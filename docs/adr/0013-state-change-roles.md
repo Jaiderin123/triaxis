@@ -21,5 +21,5 @@ Both `NURSE` and `DOCTOR` may change a patient's state. Registration stays with 
 ## Consequences
 
 - A doctor token can call `PATCH`; tests cover 403 for a missing token role and 200 for both roles.
-- The audit trail records the patient and the transition, not who performed it. Recording the user id from the JWT `sub` is a possible follow-up.
+- The audit trail records who performed each transition (the JWT `sub`), see ADR 0014, so changes made by either role stay attributable.
 - Tightening the policy later is a one-line change in the filter chain.

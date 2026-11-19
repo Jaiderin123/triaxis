@@ -6,6 +6,7 @@ spring-ai = "1.1.8"
 resilience4j = "2.4.0"
 archunit = "1.5.1"
 blockhound = "1.0.18.RELEASE"
+mapstruct = "1.6.3"
 
 [libraries]
 spring-ai-bom = { module = "org.springframework.ai:spring-ai-bom", version.ref = "spring-ai" }
@@ -13,6 +14,8 @@ resilience4j-spring-boot3 = { module = "io.github.resilience4j:resilience4j-spri
 resilience4j-reactor = { module = "io.github.resilience4j:resilience4j-reactor", version.ref = "resilience4j" }
 archunit-junit5 = { module = "com.tngtech.archunit:archunit-junit5", version.ref = "archunit" }
 blockhound = { module = "io.projectreactor.tools:blockhound", version.ref = "blockhound" }
+mapstruct = { module = "org.mapstruct:mapstruct", version.ref = "mapstruct" }
+mapstruct-processor = { module = "org.mapstruct:mapstruct-processor", version.ref = "mapstruct" }
 
 [plugins]
 spring-boot = { id = "org.springframework.boot", version.ref = "spring-boot" }
