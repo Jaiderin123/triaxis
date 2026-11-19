@@ -24,7 +24,7 @@ Triaxis is a reactive digital triage system with a clinical assistant. Nurses re
 | `triaxis-common` | n/a | Library: event contract records (`triaje.eventos`) |
 | `triaxis-security` | n/a | Library: shared resource-server (JWT) configuration |
 
-Only `triaxis-triage-service` exists today (Spring Boot 3.5.16, builds and its context test passes). The other modules are created in phase 0.
+All five modules exist as skeletons (Spring Boot 3.5.16) and `./gradlew build` passes; no business logic yet.
 
 ## Package layout (hexagonal, per service)
 
@@ -93,8 +93,8 @@ export JAVA_HOME=$HOME/.jdks/temurin-21.0.10
 ./gradlew test                                    # tests only (unverified)
 ./gradlew :triaxis-triage-service:test            # one module (verified: passes, needs Docker running)
 ./gradlew :triaxis-triage-service:bootRun         # triage on 8081 (unverified)
-./gradlew :triaxis-assistant-service:bootRun      # assistant on 8082 (module not created yet)
-./gradlew :triaxis-auth-service:bootRun           # auth on 8083 (module not created yet)
+./gradlew :triaxis-assistant-service:bootRun      # assistant on 8082 (unverified)
+./gradlew :triaxis-auth-service:bootRun           # auth on 8083 (unverified)
 docker compose up --build                         # whole system (compose file not created yet)
 kubectl apply -f deploy/k8s/                      # manifests (not created yet; kubectl 1.34.13 and kind 0.33.0 are in ~/.local/bin; az is not installed)
 ```

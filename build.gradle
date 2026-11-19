@@ -29,6 +29,8 @@ subprojects {
 
     tasks.withType(Test).configureEach {
         useJUnitPlatform()
+        // Required by BlockHound on JDK 13 and later.
+        jvmArgs '-XX:+AllowRedefinitionToAddDeleteMethods'
         finalizedBy tasks.named('jacocoTestReport')
     }
 

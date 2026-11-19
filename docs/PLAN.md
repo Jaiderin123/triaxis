@@ -29,7 +29,7 @@ The scope is large. When a phase takes longer than expected, apply cuts from the
 
 **Goal:** a multi-module build where every service starts, plus local infrastructure.
 
-State now: root build files, version catalog, Gradle wrapper 8.14.7, `.gitignore` and `README.md` exist. `triaxis-triage-service` is on Spring Boot 3.5.16 with Boot 3 starters and Testcontainers 1.x (pinned image tags), uses the root build configuration, port 8081, and its context test passes. No other module exists yet, no `docker-compose.yml`, and the repository is not initialized in git.
+State now: root build files, version catalog, Gradle wrapper 8.14.7, `.gitignore` and `README.md` exist. `triaxis-triage-service` is on Spring Boot 3.5.16 with Boot 3 starters and Testcontainers 1.x (pinned image tags), uses the root build configuration, port 8081, and its context test passes. The other four modules exist as skeletons, with ArchUnit and BlockHound in place. Missing: `docker-compose.yml`. The Spring AI starters are left as a TODO for phase 5.
 
 Tasks
 - [x] Root `build.gradle`, `settings.gradle`, version catalog, wrapper, `.gitignore`, `README.md`
@@ -38,10 +38,10 @@ Tasks
 - [ ] `git init`, first commit on `main`, create `develop`; set the repository-local `user.name` and `user.email` to the author's own identity; `.claude/` goes in `.git/info/exclude`
 - [ ] Create the remote repository, push `main` and `develop`, set branch protection (see `GIT_WORKFLOW.md`)
 - [x] `triaxis-triage-service` fixed to Boot 3.5.16 (catalog plugins, Boot 3 starters, nested wrapper and `settings.gradle` removed, port 8081)
-- [ ] Create `triaxis-common`, `triaxis-security`, `triaxis-assistant-service`, `triaxis-auth-service` (build files, main classes, `application.yml` with port and name only) and include them in `settings.gradle`
+- [x] Create `triaxis-common`, `triaxis-security`, `triaxis-assistant-service`, `triaxis-auth-service` (build files, main classes, `application.yml` with port and name only) and include them in `settings.gradle`
 - [ ] `docker-compose.yml`: PostgreSQL with pgvector (two databases through an init script), Kafka (KRaft, topic `triaje.eventos` with 3 partitions), Redis
-- [ ] Add ArchUnit 1.5.1 and BlockHound 1.0.18.RELEASE to the version catalog and test dependencies of the services (see `TECH_STACK.md`)
-- [ ] Actuator liveness and readiness on every service
+- [x] Add ArchUnit 1.5.1 and BlockHound 1.0.18.RELEASE to the version catalog and test dependencies of the services (see `TECH_STACK.md`)
+- [x] Actuator liveness and readiness on every service
 - [x] `docs/adr/README.md` and `docs/adr/0000-template.md`
 
 Files and modules: root build files, all five modules, `docker-compose.yml`, `docs/adr/`.
