@@ -1,0 +1,46 @@
+plugins {
+	id 'java'
+	alias(libs.plugins.spring.boot)
+}
+
+dependencyManagement {
+	imports {
+		mavenBom libs.spring.ai.bom.get().toString()
+	}
+}
+
+dependencies {
+	implementation project(':triaxis-common')
+	implementation project(':triaxis-security')
+
+	implementation 'org.springframework.boot:spring-boot-starter-webflux'
+	implementation 'org.springframework.boot:spring-boot-starter-validation'
+	implementation 'org.springframework.boot:spring-boot-starter-data-r2dbc'
+	implementation 'org.postgresql:r2dbc-postgresql'
+	implementation 'org.springframework.kafka:spring-kafka'
+	implementation 'org.springframework.boot:spring-boot-starter-data-redis-reactive'
+	implementation 'org.springframework.boot:spring-boot-starter-security'
+	implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+	implementation 'org.springframework.boot:spring-boot-starter-actuator'
+	implementation 'io.micrometer:micrometer-registry-prometheus'
+
+	implementation libs.resilience4j.spring.boot3
+	implementation libs.resilience4j.reactor
+	implementation 'org.springframework.boot:spring-boot-starter-aop'
+
+	// TODO (phase 5): add the Spring AI Google GenAI starters
+	// (spring-ai-starter-model-google-genai and spring-ai-starter-model-google-genai-embedding, both
+	// present in Spring AI 1.1.8). They are left out until the mock profile exists, because their
+	// auto-configuration requires an API key and would break the context-load test.
+
+	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+	testImplementation 'io.projectreactor:reactor-test'
+	testImplementation 'org.springframework.security:spring-security-test'
+	testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+	testImplementation 'org.testcontainers:junit-jupiter'
+	testImplementation 'org.testcontainers:postgresql'
+	testImplementation 'org.testcontainers:kafka'
+	testImplementation libs.archunit.junit5
+	testImplementation libs.blockhound
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
