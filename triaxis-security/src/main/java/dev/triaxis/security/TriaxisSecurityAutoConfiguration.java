@@ -3,6 +3,7 @@ package dev.triaxis.security;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.autoconfigure.security.reactive.ReactiveSecurityAutoConfiguration;
 import org.springframework.boot.autoconfigure.security.oauth2.resource.reactive.ReactiveOAuth2ResourceServerAutoConfiguration;
@@ -27,6 +28,7 @@ import reactor.core.publisher.Mono;
  */
 @AutoConfiguration(before = {ReactiveSecurityAutoConfiguration.class, ReactiveOAuth2ResourceServerAutoConfiguration.class})
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.REACTIVE)
+@ConditionalOnProperty(prefix = "triaxis.security", name = "enabled", matchIfMissing = true)
 @EnableConfigurationProperties(TriaxisSecurityProperties.class)
 public class TriaxisSecurityAutoConfiguration {
 

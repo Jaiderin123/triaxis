@@ -58,15 +58,15 @@ First commit: `chore: add multi-module skeleton and local infrastructure`
 
 Decisions (approved): OAuth2 field names (`username`, `password`, `access_token`, `token_type`, `expires_in`); demonstration users `nurse` and `doctor` in the local profile with BCrypt hashes; the signing key is generated only with `auth.jwt.generate-key-if-missing=true`, otherwise `JWT_PRIVATE_KEY` is required; `auth-service` does not depend on `triaxis-security` (only a test-scope dependency for the integration test). See ADR 0003 and ASSUMPTIONS A18.
 
-Work is split into three pull requests.
+Work is split into two pull requests: the shared security module (`feat/security-resource-server`) and the auth service with token endpoint and JWKS (`feat/auth-token-jwks`), which were merged into one because the integration test needs both.
 
 Tasks
 - [x] `triaxis-security`: auto-configuration with a lazy JWKS decoder (RS256, issuer and expiration checks), `roles` to `ROLE_*` converter, public health probes, `AuthorizationRulesCustomizer` hook for per-service rules (`feat/security-resource-server`)
 - [x] `triaxis-triage-service` and `triaxis-assistant-service` set `triaxis.security.jwks-uri` (`AUTH_JWKS_URI`, default `http://localhost:8083/.well-known/jwks.json`)
-- [ ] `POST /auth/token` with users and roles (`NURSE`, `DOCTOR`) from configuration, BCrypt hashes (`feat/auth-token-endpoint`)
-- [ ] RS256 signing, 15-minute tokens with `sub`, `roles`, `iss`, `iat`, `exp`, `jti` and `kid`; key from `JWT_PRIVATE_KEY`
-- [ ] `GET /.well-known/jwks.json` and an integration test where the decoder of `triaxis-security` validates a token issued by auth (`feat/auth-jwks`)
-- [ ] Auth security chain: only `/auth/token`, JWKS and health probes are public
+- [x] `POST /auth/token` with users and roles (`NURSE`, `DOCTOR`) from configuration, BCrypt hashes 
+- [x] RS256 signing, 15-minute tokens with `sub`, `roles`, `iss`, `iat`, `exp`, `jti` and `kid`; key from `JWT_PRIVATE_KEY`
+- [x] `GET /.well-known/jwks.json` and an integration test where the decoder of `triaxis-security` validates a token issued by auth 
+- [x] Auth security chain: only `/auth/token`, JWKS and health probes are public
 - [x] ADR 0003
 
 Modules: `triaxis-auth-service`, `triaxis-security`.
@@ -267,3 +267,12 @@ One entry per finished piece of work: what was done, decisions taken, how it was
 - **PRs:** #1 (README author), #2 (modules), #3 (local infrastructure), all squash-merged into `develop`.
 - **Environment note:** Fedora 44 has no JDK 21 package; Temurin 21 lives in `~/.jdks`, and Gradle needs `JAVA_HOME` pointing to it. `kubectl` and `kind` are installed in `~/.local/bin`.
 - **Next:** merge `develop` into `main` through a PR and tag `phase-0-skeleton`, then start phase 1.
+
+### Phase 1: Auth (done, pending merge of PRs #6 and the auth PR)
+
+- **What:** `triaxis-security` auto-configuration (lazy JWKS decoder with RS256, issuer and expiration validation; `roles` to `ROLE_*`; public health probes; `AuthorizationRulesCustomizer` hook for per-service rules; `triaxis.security.enabled` switch). `triaxis-auth-service`: hexagonal layout, `POST /auth/token`, `GET /.well-known/jwks.json`, config-backed users with BCrypt, RS256 signing with `kid`, `ProblemDetail` error handler, security chain that only exposes the token endpoint, JWKS and health probes.
+- **Decisions:** OAuth2 field names; `local` profile holds the demonstration users (`nurse` / `nurse-demo`, `doctor` / `doctor-demo`) and enables key generation; without `JWT_PRIVATE_KEY` and without that flag the service refuses to start; password check runs on `boundedElastic` and compares against a dummy hash for unknown users; auth has a test-scope dependency on `triaxis-security` only for the integration test, with `triaxis.security.enabled=false` in its test properties; the two auth PRs were merged into one. See ADR 0003 and ASSUMPTIONS A18.
+- **Verified:** `./gradlew build` passes (security: 11 tests; auth: 12 tests, including a real HTTP test where the shared decoder validates an auth-issued token through the JWKS endpoint, token rejection cases, and public-key-only JWKS).
+- **Not verified yet:** a token against a real triage endpoint (triage has no protected routes until phase 2); running the service with `JWT_PRIVATE_KEY` from a real PEM (the parsing path is written but only the generated-key path is covered by tests).
+- **Run locally:** `./gradlew :triaxis-auth-service:bootRun --args='--spring.profiles.active=local'`.
+
