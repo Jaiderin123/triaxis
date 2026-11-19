@@ -10,12 +10,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import dev.triaxis.triage.application.port.out.AuditRepository;
 import dev.triaxis.triage.application.port.out.ClockPort;
+import dev.triaxis.triage.application.port.out.EventPublisher;
 import dev.triaxis.triage.application.port.out.IdGenerator;
 import dev.triaxis.triage.application.port.out.PatientRepository;
 import dev.triaxis.triage.application.port.out.TriageMetrics;
 import dev.triaxis.triage.application.port.out.UnitOfWork;
 import dev.triaxis.triage.domain.model.AuditEntry;
 import dev.triaxis.triage.domain.model.Patient;
+import dev.triaxis.triage.domain.model.PatientEvent;
 import dev.triaxis.triage.domain.model.PatientStatus;
 import dev.triaxis.triage.domain.model.TriageLevel;
 import reactor.core.publisher.Mono;
@@ -24,17 +26,19 @@ import reactor.core.publisher.Mono;
  * In-memory implementation of every output port. The unit of work restores the previous state when the
  * work fails, which lets tests prove that a change and its audit entry are committed together.
  */
-class FakeTriageStore implements PatientRepository, AuditRepository, ClockPort, IdGenerator, UnitOfWork,
-		TriageMetrics {
+class FakeTriageStore implements PatientRepository, AuditRepository, EventPublisher, ClockPort, IdGenerator,
+		UnitOfWork, TriageMetrics {
 
 	final Map<UUID, Patient> patients = new LinkedHashMap<>();
 	final List<AuditEntry> audit = new ArrayList<>();
+	final List<PatientEvent> events = new ArrayList<>();
 	final List<TriageLevel> classified = new ArrayList<>();
 	final AtomicInteger committedUnits = new AtomicInteger();
 
 	Instant now = Instant.parse("2026-11-18T15:30:00Z");
 	UUID nextId = UUID.fromString("00000000-0000-0000-0000-000000000001");
 	boolean failAudit;
+	boolean failEvents;
 	/** When set, runs after the patient is read and before the transaction starts (simulates a race). */
 	Runnable beforeUnitOfWork;
 
@@ -82,6 +86,19 @@ class FakeTriageStore implements PatientRepository, AuditRepository, ClockPort, 
 		});
 	}
 
+	// EventPublisher
+
+	@Override
+	public Mono<Void> publish(PatientEvent event) {
+		return Mono.defer(() -> {
+			if (failEvents) {
+				return Mono.error(new IllegalStateException("outbox unavailable"));
+			}
+			events.add(event);
+			return Mono.<Void>empty();
+		});
+	}
+
 	// ClockPort, IdGenerator, TriageMetrics
 
 	@Override
@@ -109,12 +126,15 @@ class FakeTriageStore implements PatientRepository, AuditRepository, ClockPort, 
 			}
 			Map<UUID, Patient> patientsBefore = new LinkedHashMap<>(patients);
 			List<AuditEntry> auditBefore = new ArrayList<>(audit);
+			List<PatientEvent> eventsBefore = new ArrayList<>(events);
 			return work.doOnSuccess(result -> committedUnits.incrementAndGet())
 					.doOnError(error -> {
 						patients.clear();
 						patients.putAll(patientsBefore);
 						audit.clear();
 						audit.addAll(auditBefore);
+						events.clear();
+						events.addAll(eventsBefore);
 					});
 		});
 	}

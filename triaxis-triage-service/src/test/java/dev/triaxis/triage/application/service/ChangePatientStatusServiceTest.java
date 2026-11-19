@@ -10,6 +10,7 @@ import dev.triaxis.triage.domain.exception.PatientNotFoundException;
 import dev.triaxis.triage.domain.model.AuditEntry;
 import dev.triaxis.triage.domain.model.AuditEventType;
 import dev.triaxis.triage.domain.model.Patient;
+import dev.triaxis.triage.domain.model.PatientEventType;
 import dev.triaxis.triage.domain.model.PatientStatus;
 import dev.triaxis.triage.domain.model.TriageLevel;
 import dev.triaxis.triage.domain.model.VitalSigns;
@@ -23,8 +24,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ChangePatientStatusServiceTest {
 
 	private final FakeTriageStore store = new FakeTriageStore();
-	private final ChangePatientStatusService service = new ChangePatientStatusService(store, store, store, store,
-			new StatusTransitionPolicy());
+	private final ChangePatientStatusService service = new ChangePatientStatusService(store, store, store, store, store,
+			store, new StatusTransitionPolicy());
 	private final UUID id = UUID.fromString("00000000-0000-0000-0000-0000000000aa");
 	private final Instant registeredAt = Instant.parse("2026-11-18T15:00:00Z");
 
@@ -56,6 +57,45 @@ class ChangePatientStatusServiceTest {
 			assertThat(entry.newStatus()).isEqualTo(PatientStatus.IN_CONSULTATION);
 			assertThat(entry.occurredAt()).isEqualTo(store.now);
 		});
+	}
+
+	@Test
+	void publishesAnEventPerTransitionWithTheLevelAndBothStatuses() {
+		service.changeStatus(id, PatientStatus.IN_CONSULTATION, "doctor").block();
+		service.changeStatus(id, PatientStatus.DISCHARGED, "doctor").block();
+
+		assertThat(store.events).hasSize(2);
+		assertThat(store.events.get(0).type()).isEqualTo(PatientEventType.CONSULTATION_STARTED);
+		assertThat(store.events.get(0).previousStatus()).isEqualTo(PatientStatus.REGISTERED);
+		assertThat(store.events.get(0).newStatus()).isEqualTo(PatientStatus.IN_CONSULTATION);
+		assertThat(store.events.get(0).level()).isEqualTo(TriageLevel.NOT_URGENT);
+		assertThat(store.events.get(1).type()).isEqualTo(PatientEventType.DISCHARGED);
+		assertThat(store.events.get(1).previousStatus()).isEqualTo(PatientStatus.IN_CONSULTATION);
+		assertThat(store.events.get(1).patientId()).isEqualTo(id);
+	}
+
+	@Test
+	void publishesNothingWhenTheChangeIsRejected() {
+		store.patients.put(id, patient(PatientStatus.DISCHARGED));
+
+		StepVerifier.create(service.changeStatus(id, PatientStatus.IN_CONSULTATION, "doctor"))
+				.expectError(InvalidStatusTransitionException.class)
+				.verify();
+
+		assertThat(store.events).isEmpty();
+	}
+
+	@Test
+	void changeIsRolledBackWhenTheEventCannotBeRegistered() {
+		store.failEvents = true;
+
+		StepVerifier.create(service.changeStatus(id, PatientStatus.IN_CONSULTATION, "doctor"))
+				.expectErrorMessage("outbox unavailable")
+				.verify();
+
+		assertThat(store.patients.get(id).status()).isEqualTo(PatientStatus.REGISTERED);
+		assertThat(store.audit).isEmpty();
+		assertThat(store.events).isEmpty();
 	}
 
 	@Test

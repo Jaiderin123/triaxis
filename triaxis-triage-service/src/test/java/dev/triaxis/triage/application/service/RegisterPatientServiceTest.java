@@ -7,6 +7,7 @@ import java.util.Set;
 import dev.triaxis.triage.domain.exception.InvalidPatientDataException;
 import dev.triaxis.triage.domain.model.AuditEntry;
 import dev.triaxis.triage.domain.model.AuditEventType;
+import dev.triaxis.triage.domain.model.PatientEventType;
 import dev.triaxis.triage.domain.model.PatientStatus;
 import dev.triaxis.triage.domain.model.RegistrationData;
 import dev.triaxis.triage.domain.model.TriageLevel;
@@ -21,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class RegisterPatientServiceTest {
 
 	private final FakeTriageStore store = new FakeTriageStore();
-	private final RegisterPatientService service = new RegisterPatientService(store, store, store, store, store, store,
+	private final RegisterPatientService service = new RegisterPatientService(store, store, store, store, store, store, store,
 			TriageClassifier.withDefaultRules(new ComplaintPolicy(Set.of("renovacion de recetario"))),
 			new SlaPolicy(Map.of(TriageLevel.CRITICAL, 5, TriageLevel.URGENT, 10, TriageLevel.URGENT_2, 30,
 					TriageLevel.NOT_URGENT, 60, TriageLevel.NOT_URGENT_2, 120)));
@@ -56,6 +57,36 @@ class RegisterPatientServiceTest {
 	}
 
 	@Test
+	void publishesTheRegisteredEventWithTheLevelInTheSameUnitOfWork() {
+		service.register(criticalPatient(), "nurse").block();
+
+		assertThat(store.events).singleElement().satisfies(event -> {
+			assertThat(event.type()).isEqualTo(PatientEventType.REGISTERED);
+			assertThat(event.patientId()).isEqualTo(store.nextId);
+			assertThat(event.level()).isEqualTo(TriageLevel.CRITICAL);
+			assertThat(event.previousStatus()).isNull();
+			assertThat(event.newStatus()).isEqualTo(PatientStatus.REGISTERED);
+			assertThat(event.slaMinutes()).isEqualTo(5);
+			assertThat(event.escalated()).isFalse();
+			assertThat(event.occurredAt()).isEqualTo(store.now);
+		});
+	}
+
+	@Test
+	void nothingIsStoredWhenTheEventCannotBeRegistered() {
+		store.failEvents = true;
+
+		StepVerifier.create(service.register(criticalPatient(), "nurse"))
+				.expectErrorMessage("outbox unavailable")
+				.verify();
+
+		assertThat(store.patients).isEmpty();
+		assertThat(store.audit).isEmpty();
+		assertThat(store.events).isEmpty();
+		assertThat(store.classified).isEmpty();
+	}
+
+	@Test
 	void countsTheClassificationOnce() {
 		service.register(criticalPatient(), "nurse").block();
 
@@ -73,6 +104,7 @@ class RegisterPatientServiceTest {
 
 		assertThat(store.patients).isEmpty();
 		assertThat(store.audit).isEmpty();
+		assertThat(store.events).isEmpty();
 		assertThat(store.classified).isEmpty();
 	}
 
