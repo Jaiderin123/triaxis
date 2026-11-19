@@ -54,7 +54,7 @@ Hotfixes: branch from `main`, PR into `main`, then a PR from `main` back into `d
 ### PR content
 
 - Title: the Conventional Commit subject (for example `feat(triage): classify patients by vital signs`).
-- Body: what changed, why, how it was tested, and the plan task it closes. Link ADRs when relevant.
+- Body: what changed, why, how it was tested, and the plan task it closes. Link ADRs when relevant. The pull request template has a documentation checklist; run `scripts/check-docs.sh` before opening the pull request.
 - No secrets or private files.
 - The build must pass before the merge.
 
