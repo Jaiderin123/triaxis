@@ -26,7 +26,8 @@ Branch from `develop` and open pull requests as in `GIT_WORKFLOW.md`. Starting p
 - The interval, the batch size and the SLA per level are properties (`triage.sla.minutes`, plus new `triage.escalation.*`), so tests can use seconds. Time comes from `ClockPort`.
 - A patient who entered consultation or was discharged is never escalated, and a patient is escalated once (RN-03); the tests must cover the race with a concurrent `PATCH`.
 - A scheduler adapter goes in `infrastructure.adapter.in.scheduler`, next to the outbox scheduler; BlockHound and ArchUnit tests must keep passing.
-- Still to write: ADR 0006 (atomic escalation) and the ADRs of later phases.
+- ADR 0006 (atomic escalation) is written in the pull request that implements it; the other pending ADRs are listed in `ARCHITECTURE.md` section 14.
+- Documentation sync: follow the checklist in `CLAUDE.md` and run `scripts/check-docs.sh` before each pull request.
 
 ## Cut list and priorities
 
