@@ -35,11 +35,11 @@ Tasks
 - [x] Root `build.gradle`, `settings.gradle`, version catalog, wrapper, `.gitignore`, `README.md`
 - [x] JDK 21 and Kubernetes tools (`kubectl`, `kind`) available locally
 - [x] `docs/private/` holds the requirements specification and is in `.gitignore`
-- [ ] `git init`, first commit on `main`, create `develop`; set the repository-local `user.name` and `user.email` to the author's own identity; `.claude/` goes in `.git/info/exclude`
-- [ ] Create the remote repository, push `main` and `develop`, set branch protection (see `GIT_WORKFLOW.md`)
+- [x] `git init`, first commit on `main`, create `develop`; set the repository-local `user.name` and `user.email` to the author's own identity; `.claude/` goes in `.git/info/exclude`
+- [x] Create the remote repository, push `main` and `develop`, set branch protection (see `GIT_WORKFLOW.md`)
 - [x] `triaxis-triage-service` fixed to Boot 3.5.16 (catalog plugins, Boot 3 starters, nested wrapper and `settings.gradle` removed, port 8081)
 - [x] Create `triaxis-common`, `triaxis-security`, `triaxis-assistant-service`, `triaxis-auth-service` (build files, main classes, `application.yml` with port and name only) and include them in `settings.gradle`
-- [ ] `docker-compose.yml`: PostgreSQL with pgvector (two databases through an init script), Kafka (KRaft, topic `triaje.eventos` with 3 partitions), Redis
+- [x] `docker-compose.yml`: PostgreSQL with pgvector (two databases through an init script), Kafka (KRaft, topic `triaje.eventos` with 3 partitions), Redis
 - [x] Add ArchUnit 1.5.1 and BlockHound 1.0.18.RELEASE to the version catalog and test dependencies of the services (see `TECH_STACK.md`)
 - [x] Actuator liveness and readiness on every service
 - [x] `docs/adr/README.md` and `docs/adr/0000-template.md`
