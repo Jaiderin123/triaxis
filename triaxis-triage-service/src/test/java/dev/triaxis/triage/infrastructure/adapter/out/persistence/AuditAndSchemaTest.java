@@ -5,15 +5,13 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
-import dev.triaxis.triage.TestcontainersConfiguration;
+import dev.triaxis.triage.TriageIntegrationTest;
 import dev.triaxis.triage.domain.model.AuditEntry;
 import dev.triaxis.triage.domain.model.AuditEventType;
 import dev.triaxis.triage.domain.model.Patient;
 import dev.triaxis.triage.domain.model.PatientStatus;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.util.StreamUtils;
@@ -22,8 +20,7 @@ import reactor.test.StepVerifier;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-@SpringBootTest
-@Import(TestcontainersConfiguration.class)
+@TriageIntegrationTest
 class AuditAndSchemaTest {
 
 	@Autowired
