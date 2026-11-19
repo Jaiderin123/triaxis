@@ -313,6 +313,7 @@ CREATE TABLE outbox_events (
   event_id     UUID NOT NULL UNIQUE,
   message_key  VARCHAR(64) NOT NULL,
   event_type   VARCHAR(32) NOT NULL,
+  correlation_id VARCHAR(64),             -- copied to the Kafka header correlationId
   payload      JSONB NOT NULL,
   created_at   TIMESTAMPTZ NOT NULL,
   published_at TIMESTAMPTZ

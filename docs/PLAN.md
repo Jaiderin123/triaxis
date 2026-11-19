@@ -137,7 +137,7 @@ Decisions (approved): full transactional outbox (not the publish-after-commit fa
 
 Tasks
 - [x] Event records in `triaxis-common` (`TriageEvent`, `EventType`, `EventLevel`, `EventStatus`; fields in Spanish, `version: 1`; topic and header names as constants) (`feat/events-contract`)
-- [ ] `outbox_events` table; patient, audit and outbox written in one transaction (`TransactionalOperator`)
+- [x] `outbox_events` table (with `correlation_id`); patient, audit and outbox written in one transaction; `EventPublisher` port, domain `PatientEvent`, MapStruct mapper to the contract; `X-Correlation-Id` filter feeding the outbox (`feat/triage-outbox`)
 - [ ] `OutboxRelay`: batch poll with `FOR UPDATE SKIP LOCKED`, single relay in flight, `acks=all`, idempotent producer, key = patient id
 - [ ] Gauge `triage.outbox.pending`
 - [ ] Fallback if short on time: publish after commit with retry (cut list item 5); record it in the ADR

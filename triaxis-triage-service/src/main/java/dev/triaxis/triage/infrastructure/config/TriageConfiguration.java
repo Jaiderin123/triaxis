@@ -7,6 +7,7 @@ import dev.triaxis.triage.application.port.in.GetPatientUseCase;
 import dev.triaxis.triage.application.port.in.RegisterPatientUseCase;
 import dev.triaxis.triage.application.port.out.AuditRepository;
 import dev.triaxis.triage.application.port.out.ClockPort;
+import dev.triaxis.triage.application.port.out.EventPublisher;
 import dev.triaxis.triage.application.port.out.IdGenerator;
 import dev.triaxis.triage.application.port.out.PatientRepository;
 import dev.triaxis.triage.application.port.out.TriageMetrics;
@@ -48,16 +49,17 @@ class TriageConfiguration {
 	}
 
 	@Bean
-	RegisterPatientUseCase registerPatientUseCase(PatientRepository patients, AuditRepository audit, ClockPort clock,
-			IdGenerator ids, UnitOfWork unitOfWork, TriageMetrics metrics, TriageClassifier classifier,
+	RegisterPatientUseCase registerPatientUseCase(PatientRepository patients, AuditRepository audit,
+			EventPublisher events, ClockPort clock, IdGenerator ids, UnitOfWork unitOfWork, TriageMetrics metrics, TriageClassifier classifier,
 			SlaPolicy sla) {
-		return new RegisterPatientService(patients, audit, clock, ids, unitOfWork, metrics, classifier, sla);
+		return new RegisterPatientService(patients, audit, events, clock, ids, unitOfWork, metrics, classifier, sla);
 	}
 
 	@Bean
 	ChangePatientStatusUseCase changePatientStatusUseCase(PatientRepository patients, AuditRepository audit,
-			ClockPort clock, UnitOfWork unitOfWork, StatusTransitionPolicy policy) {
-		return new ChangePatientStatusService(patients, audit, clock, unitOfWork, policy);
+			EventPublisher events, IdGenerator ids, ClockPort clock, UnitOfWork unitOfWork,
+			StatusTransitionPolicy policy) {
+		return new ChangePatientStatusService(patients, audit, events, ids, clock, unitOfWork, policy);
 	}
 
 	@Bean
