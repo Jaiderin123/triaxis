@@ -29,7 +29,7 @@ The scope is large. When a phase takes longer than expected, apply cuts from the
 
 **Goal:** a multi-module build where every service starts, plus local infrastructure.
 
-State now: root build files, version catalog, Gradle wrapper 8.14.7, `.gitignore` and `README.md` exist. `triaxis-triage-service` is on Spring Boot 3.5.16 with Boot 3 starters and Testcontainers 1.x (pinned image tags), uses the root build configuration, port 8081, and its context test passes. The other four modules exist as skeletons, with ArchUnit and BlockHound in place. Missing: `docker-compose.yml`. The Spring AI starters are left as a TODO for phase 5.
+**Status:** done (see the progress log at the end).
 
 Tasks
 - [x] Root `build.gradle`, `settings.gradle`, version catalog, wrapper, `.gitignore`, `README.md`
@@ -242,3 +242,22 @@ First commit: `docs: complete README and architecture decision records`
 | RN-03 Escalation idempotency | 4 |
 | RN-04 Audit | 2 (escalation rows in 4) |
 | RN-05 Anti-hallucination | 5 |
+
+---
+
+## Progress log
+
+One entry per finished piece of work: what was done, decisions taken, how it was verified, and the pull requests. Keep it factual so the plan works as a living specification.
+
+### Phase 0: Skeleton (done)
+
+- **What:** five-module Gradle build (Boot 3.5.16, Java 21 toolchain, JaCoCo), wrapper 8.14.7, version catalog (Boot, dependency-management plugin, Spring AI 1.1.8 BOM, Resilience4j 2.4.0, ArchUnit 1.5.1, BlockHound 1.0.18.RELEASE), `docker-compose.yml` with PostgreSQL (pgvector, databases `triage` and `assistant`), Kafka KRaft (topic `triaje.eventos`, 3 partitions) and Redis.
+- **Decisions:**
+  - Triage application class renamed to `TriageApplication` to match the architecture; test containers moved to Testcontainers 1.x (the version Boot 3.5 manages) with pinned images (`postgres:16-alpine`, `apache/kafka:3.9.1`).
+  - Spring AI Google GenAI starters left as a TODO for phase 5: their auto-configuration needs an API key and breaks the context test. Both artifacts exist in 1.1.8.
+  - Health probes enabled in every service. They are still behind the default security (401) until phase 1 makes them public.
+  - The `-XX:+AllowRedefinitionToAddDeleteMethods` flag is set for tests so BlockHound works on JDK 21 (it prints a deprecation warning, harmless).
+- **Verified:** `./gradlew build` passes with JDK 21; `docker compose up -d` brings PostgreSQL, Kafka and Redis healthy, both databases and the `vector` extension exist, and the topic has 3 partitions.
+- **PRs:** #1 (README author), #2 (modules), #3 (local infrastructure), all squash-merged into `develop`.
+- **Environment note:** Fedora 44 has no JDK 21 package; Temurin 21 lives in `~/.jdks`, and Gradle needs `JAVA_HOME` pointing to it. `kubectl` and `kind` are installed in `~/.local/bin`.
+- **Next:** merge `develop` into `main` through a PR and tag `phase-0-skeleton`, then start phase 1.
