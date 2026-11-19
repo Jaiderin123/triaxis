@@ -1,0 +1,127 @@
+# Triaxis: Technology Stack
+
+Reference document for **Triaxis**, a digital triage system with a clinical assistant (Triage service, Clinical Assistant service and Auth service).
+Items marked **(confirm)** must be checked against Maven Central / Docker Hub when the project is created.
+
+## 0. Naming
+
+| Item | Convention |
+|---|---|
+| Project name | Triaxis |
+| Repository | `triaxis` |
+| Base package | `dev.triaxis.<module>` (for example `dev.triaxis.triage`); Gradle group `dev.triaxis` |
+| Gradle modules | `triaxis-triage-service`, `triaxis-assistant-service`, `triaxis-auth-service`, `triaxis-common`, `triaxis-security` |
+| Docker images | `triaxis/triage-service`, `triaxis/assistant-service`, `triaxis/auth-service` |
+
+The name must be checked on GitHub and Google before publishing, to avoid clashing with an existing health product.
+
+## 1. Platform
+
+| Area | Choice | Notes |
+|---|---|---|
+| Language | Java 21 (Temurin, latest 21.0.x) **(confirm patch)** | LTS. Spring Boot 3.5 supports Java 17 to 25 |
+| Framework | Spring Boot **3.5.16** | Last OSS release of the 3.5 line. OSS support ended in June 2026 (see ADR) |
+| Reactive stack | Spring WebFlux, Project Reactor | No blocking calls on the event loop |
+| Build | Gradle **8.14.x** (wrapper), Groovy DSL, multi-module **(confirm patch)** | Version catalog in `gradle/libs.versions.toml` |
+
+## 2. Modules
+
+| Module | Responsibility |
+|---|---|
+| `triaxis-triage-service` | Patient registration, classification, state flow, SLA monitoring and escalation, audit, operation report |
+| `triaxis-assistant-service` | RAG over clinical protocols, real-time urgency view built from Kafka events |
+| `triaxis-auth-service` | Issues JWTs (RS256) and exposes the public key (JWKS) |
+| `triaxis-common` | Event contracts shared by the services |
+| `triaxis-security` | Shared JWT validation configuration (resource server) |
+
+## 3. Data and messaging
+
+| Area | Choice | Notes |
+|---|---|---|
+| Relational database | PostgreSQL 16 or 17 **(confirm tag)** | Must match a version supported by the Azure target |
+| Vector search | pgvector extension (`pgvector/pgvector` image) | Custom R2DBC repository, no `PgVectorStore` |
+| Database access | Spring Data R2DBC, `r2dbc-postgresql` | Schema created with init scripts (no Flyway/JDBC) |
+| Messaging | Apache Kafka, KRaft mode **(confirm tag)** | Topic: `triaje.eventos` |
+| Kafka client | Spring for Apache Kafka | Async `@KafkaListener` returning `Mono`, manual acknowledgment |
+| Cache / read model | Redis 7.x **(confirm tag)** via Spring Data Redis Reactive | Urgency view rebuilt from events |
+
+## 4. AI
+
+| Area | Choice | Notes |
+|---|---|---|
+| Framework | Spring AI **1.1.x** (latest available) **(confirm exact patch)** | Spring AI 1.1 supports Boot 3.4 and 3.5. Spring AI 2.x requires Boot 4 |
+| LLM and embeddings | Google Gemini (chat and embeddings) | API key from an environment variable |
+| Local / tests | `mock` profile (deterministic fake LLM and embeddings) | Lets anyone run the system without an API key |
+| Retrieval | Cosine distance in pgvector with a similarity threshold | Below the threshold: fixed "no protocol available" answer, **no LLM call** |
+| Reactive isolation | `EmbeddingModel` and blocking SDK calls run on `boundedElastic` | |
+
+## 5. Resilience, observability and security
+
+| Area | Choice |
+|---|---|
+| Resilience | Resilience4j **2.4.0** (`resilience4j-spring-boot3`, `resilience4j-reactor`): circuit breaker and timeout on LLM calls, explicit fallback (HTTP 503) |
+| Health | Spring Boot Actuator: liveness and readiness probes |
+| Metrics | Micrometer: classification counts per level, escalations, LLM latency |
+| Logging | Structured JSON logs with correlation id |
+| Tracing | OpenTelemetry (bonus, if time allows) |
+| Authentication | JWT, RS256, issued by `auth-service`; validated by the other services through the public key (JWKS) |
+| Secrets | Environment variables only. Nothing hardcoded or committed |
+
+## 6. Testing
+
+| Area | Choice |
+|---|---|
+| Unit and integration | JUnit 5, Reactor Test (`StepVerifier`) |
+| Infrastructure | Testcontainers (PostgreSQL, Kafka) |
+| LLM | Mocked (never real calls in tests) |
+| Coverage | JaCoCo |
+| Architecture rules | ArchUnit **1.5.1**: enforces the hexagonal dependency rules (domain, application, infrastructure) |
+| Non-blocking proof | BlockHound **1.0.18.RELEASE**: fails a test if a blocking call runs on an event-loop thread |
+| Redis in tests | Testcontainers generic Redis container (`redis` image, pinned tag); no extra library |
+
+## 7. Packaging and deployment
+
+| Area | Choice |
+|---|---|
+| Containers | One Docker image per service, pinned base image tags (never `latest`) |
+| Local run | `docker-compose` that starts PostgreSQL, Kafka, Redis and all services with one command |
+| Orchestration | Kubernetes manifests (Deployment, Service, probes) |
+| Cloud | Azure (Azure Container Apps or AKS, final choice pending) |
+| Local cluster validation | kind / minikube / k3d |
+
+## 8. Version management rule
+
+Do **not** pin versions already managed by the Spring Boot BOM (Spring Kafka, Spring Data Redis, R2DBC driver, Reactor, Micrometer, Spring Security, Testcontainers).
+
+Pin explicitly only:
+1. The Spring Boot Gradle plugin (3.5.16).
+2. The Spring AI BOM.
+3. Resilience4j.
+4. ArchUnit and BlockHound (checked: neither is managed by the Spring Boot 3.5.16 BOM).
+5. Docker image tags.
+
+BlockHound on JDK 13+ may need the JVM flag `-XX:+AllowRedefinitionToAddDeleteMethods` in the test task (not verified yet).
+
+## 9. Language conventions
+
+- Code, comments, commits and documentation: **English**.
+- External contract (paths, JSON fields, event names, state and level values): **Spanish**, exactly as specified (`/triage/pacientes`, `nivel`, `slaMinutos`, `REGISTRADO`, `paciente_registrado`, `triaje.eventos`).
+- Internal domain model in English, mapped to the external contract at the boundary (DTOs / enums with an external value).
+
+## 10. Decisions to record as ADRs
+
+1. Spring Kafka instead of Reactor Kafka (Reactor Kafka discontinued in May 2025).
+2. Custom R2DBC repository for vectors instead of Spring AI `PgVectorStore` (blocking JDBC).
+3. Separate identity service (JWT RS256 + JWKS) and what replaces it in production (Entra ID or Keycloak).
+4. Degraded mode of the assistant (circuit breaker, 503) and why Triage never depends on it.
+5. Gemini for LLM and embeddings, `mock` profile, and discarded alternatives (Ollama, DeepSeek).
+6. Spring Boot 3.5 / Spring AI 1.1 out of OSS support, chosen on purpose, migration path to Boot 4 / Spring AI 2.
+7. Azure deployment strategy and cost control.
+8. Alert channel for escalated patients.
+
+## 11. Open items
+
+- [ ] Confirm exact versions marked **(confirm)**.
+- [ ] Choose Azure Container Apps or AKS, and how Kafka, PostgreSQL and Redis run there.
+- [ ] Choose the alert channel and format for escalations.
+- [ ] Calibrate the similarity threshold with the Gemini embedding model.

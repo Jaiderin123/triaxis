@@ -1,0 +1,4 @@
+rootProject.name = 'triaxis'
+
+// More modules (assistant, auth, common, security) will be included later.
+include 'triaxis-triage-service'

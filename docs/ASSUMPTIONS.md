@@ -1,0 +1,140 @@
+# Triaxis: Assumptions and Ambiguities
+
+A log of every place where the requirements specification is silent or ambiguous, the decision taken, and what changes if the decision is wrong. "The requirements specification" is the original brief; [`ARCHITECTURE.md`](ARCHITECTURE.md) is the design that applies these decisions. Add new entries at the end and never reuse an ID.
+
+A1 to A4 come from `ARCHITECTURE.md` section 6.2. A5 onward were added while preparing the plan.
+
+---
+
+## A1. Integer vital signs
+
+- **Ambiguity:** the specification gives ranges such as 90 <= SpO2 <= 93 for level 2 and "SpO2 < 90" for level 1, without saying whether values like 93.5 are possible. Treated as real numbers, a gap appears between 93 and 94 (and likewise for systolic pressure between 100 and 101).
+- **Decision:** heart rate, systolic, diastolic, SpO2, pain, GCS and age are integers. Decimals are rejected with 400. Temperature has one decimal.
+- **Why:** it closes the classification gaps and matches how the measurements are recorded in practice.
+- **Impact if wrong:** a client sending `93.5` gets 400 instead of a classification. Switching to decimals needs an explicit rule for the gaps and a schema change from `SMALLINT`.
+
+## A2. GCS 14 and 15
+
+- **Ambiguity:** level 2 covers GCS 9 to 13 and level 1 covers GCS <= 8; GCS 14 and 15 are not mentioned.
+- **Decision:** GCS 14 and 15 do not trigger any level by themselves.
+- **Why:** the specification lists conditions per level and 14 to 15 matches none of them.
+- **Impact if wrong:** patients with GCS 14 would be classified one level too low.
+
+## A3. Administrative complaint matching
+
+- **Ambiguity:** the specification says the complaint "belongs to the list" without defining matching.
+- **Decision:** normalized exact equality (lowercase, accents removed, trimmed). The list is configurable (`triage.administrative-complaints`). Matching is not "contains".
+- **Why:** a clinical complaint that merely mentions "seguimiento" must not be downgraded to level 5.
+- **Impact if wrong:** a free-text complaint such as "renovacion de recetario cronico" would stay at level 4 instead of 5. Safe direction (higher priority), tracked as open decision 4 in `ARCHITECTURE.md`.
+
+## A4. Validation ranges
+
+- **Ambiguity:** none in the numbers, but not stated: which message format, and whether several errors are reported together.
+- **Decision:** ranges exactly as in the specification table (HR 20-250, systolic 60-260, diastolic 30-160 and lower than systolic, SpO2 70-100, temperature 34.0-42.0, pain 0-10, GCS 3-15, age 0-120, name 3-100 characters). The error message names the invalid field. Violations are collected and returned together in a `ProblemDetail`.
+- **Why:** meets "400 with a clear message indicating the invalid field".
+- **Impact if wrong:** low; only the error body shape changes.
+
+## A5. Request body field names
+
+- **Ambiguity:** RF-01 lists the data (full name, age, heart rate, and so on) but not the JSON field names.
+- **Decision:** Spanish camelCase names: `nombreCompleto`, `edad`, `frecuenciaCardiaca`, `presionSistolica`, `presionDiastolica`, `spo2`, `temperatura`, `dolor`, `gcs`, `quejaPrincipal`. Common variants are accepted with `@JsonAlias` (for example `nombre`, `fc`, `heartRate`). The canonical names are documented in the README.
+- **Why:** the rest of the contract (`estado`, `nivel`, `slaMinutos`, `fechaRegistro`) is Spanish camelCase, and aliases tolerate an automated client using a different spelling.
+- **Impact if wrong:** a client using an unlisted name gets 400. Adding an alias is a one-line change.
+
+## A6. Meaning of "exceeded the SLA"
+
+- **Ambiguity:** "superó su SLA" could mean elapsed >= SLA or elapsed > SLA.
+- **Decision:** strictly greater: `registered_at + sla_minutes < now`. A patient exactly at the limit is not escalated yet.
+- **Why:** "exceeded" is read literally; the scheduler runs periodically so the difference is at most one interval.
+- **Impact if wrong:** an escalation could be one scheduler interval late in a boundary test. Change `<` to `<=` in the escalation `WHERE`.
+
+## A7. Waiting time for patients discharged directly
+
+- **Ambiguity:** waiting time is "registration to first entry into consultation". A patient moved `REGISTRADO -> ALTA` never enters consultation.
+- **Decision:** they have no waiting time and are excluded from the average and p95. They still count in the totals and in the per-level counts.
+- **Why:** the metric is defined only for consultation.
+- **Impact if wrong:** averages would be lower or higher if direct discharges were measured to discharge time.
+
+## A8. Hours without patients in the report
+
+- **Ambiguity:** whether the hourly report lists hours with zero patients.
+- **Decision:** such hours are omitted.
+- **Why:** simpler SQL (`GROUP BY` only returns existing buckets) and no meaning for averages of empty sets.
+- **Impact if wrong:** a client that expects a continuous series must fill the gaps; a `generate_series` join would add them.
+
+## A9. Escalated patient that enters consultation
+
+- **Ambiguity:** whether an escalated patient may still move to `EN_CONSULTA`.
+- **Decision:** yes. The `escalado` flag stays true and the normal transitions apply. Escalation never changes the status, only the flag.
+- **Why:** escalation is an alert, not a state; blocking consultation would harm the patient.
+- **Impact if wrong:** low; adding a rule is a change in the transition policy.
+
+## A10. Response when no protocol is found
+
+- **Ambiguity:** the specification asks for an explicit answer that no protocol is available, without a status code or body.
+- **Decision:** HTTP 200 with a fixed message in `respuesta` and `fuentes: []`. No LLM call and no generated clinical text.
+- **Why:** it is a valid answer to the question, not a server or client error; it keeps the response shape stable for clients.
+- **Impact if wrong:** a client expecting 404 would need a change in the handler only.
+
+## A11. Model output that fails citation validation
+
+- **Ambiguity:** what to return when the LLM answers but cites no excerpt, or cites an id that was not retrieved.
+- **Decision:** the answer is discarded and replaced by the same fixed "no protocol available" notice with empty `fuentes`. A metric (`assistant.answers`, outcome `rejected`) counts it.
+- **Why:** RN-05 forbids unsourced clinical content; returning the model text would break it.
+- **Impact if wrong:** some valid answers may be dropped if the model formats ids badly; mitigated by structured output and by tests with the three sample questions.
+
+## A12. Time zone and clock handling
+
+- **Ambiguity:** not specified.
+- **Decision:** all timestamps are stored as `TIMESTAMPTZ`, handled in UTC, and returned in ISO 8601 with `Z`. The R2DBC session time zone is UTC. Time always comes from a `Clock` port. Hourly buckets are UTC hours.
+- **Why:** removes daylight-saving and server-locale effects and makes SLA tests deterministic.
+- **Impact if wrong:** clients in Colombia (UTC-5) see buckets shifted by whole hours; since the offset is a whole number of hours, bucket boundaries still align.
+
+## A13. Event message format and versioning
+
+- **Ambiguity:** the specification leaves the format free ("JSON, Avro, etc.; document it").
+- **Decision:** JSON on topic `triaje.eventos` (3 partitions, key = patient id). Field names are Spanish (`idEvento`, `tipo`, `version`, `ocurridoEn`, `pacienteId`, `nivel`, `estadoAnterior`, `estadoNuevo`, `slaMinutos`, `escalado`). `version: 1` is in every payload; headers `correlationId` and `eventType`. Delivery is at least once and consumers are idempotent. Every event carries the patient level so the urgency view needs no extra call.
+- **Why:** simple to inspect and test, no schema registry needed.
+- **Impact if wrong:** moving to Avro needs a registry and a new module dependency; the `version` field leaves room for compatible evolution.
+
+## A14. Alert channel for RF-06
+
+- **Ambiguity:** channel, format and technology are deliberately unspecified.
+- **Decision:** a Kafka-driven `AlertNotifier` inside `triage-service`: webhook (Slack or Teams-compatible JSON) as the real adapter, structured log as the default. Retries with backoff; failures are counted and never affect escalation.
+- **Why:** decoupled from the escalation transaction, no fourth service, testable with a fake webhook. Alternatives (email, SSE, a separate `notification-service`) are in `ARCHITECTURE.md` 6.8.
+- **Impact if wrong:** replacing the adapter does not touch the domain. The full reasoning goes to ADR 0011 (not written yet).
+
+## A16. LLM profile in the deployed environment
+
+- **Ambiguity:** the specification asks for a deployed, reachable system but does not say whether it must use a real LLM.
+- **Decision:** not decided. Local and test runs use the `mock` profile. For the deployed environment either keep `mock` (no key, no cost, deterministic) or enable Gemini through a Kubernetes Secret. To be chosen in phase 8 and recorded in ADR 0008 or 0010.
+- **Why:** a real model shows the RAG working, but adds a secret, cost and a failure point.
+- **Impact if wrong:** a reviewer may expect real generated answers; or a missing key may break the demo.
+
+## A17. Who may change a patient's state
+
+- **Ambiguity:** the specification asks for authentication but not for roles. In practice a doctor starts a consultation.
+- **Decision:** `NURSE` and `DOCTOR` may both change a patient's state. `NURSE` registers patients; `DOCTOR` reads reports and uses the assistant; reads of a patient and of the urgency view are open to both.
+- **Why:** the doctor is who starts a consultation, so restricting `PATCH` to nurses would block the real flow.
+- **Impact if wrong:** a stricter policy is a one-line rule change in the security filter chain. Recorded in ADR 0013.
+
+## A18. Authentication scope
+
+- **Ambiguity:** "basic authentication (JWT or API key)" without details.
+- **Decision:** JWT RS256 from a separate `auth-service` with users in configuration, short-lived tokens, no refresh tokens, no registration. Production would use Entra ID or Keycloak.
+- **Why:** shows the validation path through JWKS without an external identity provider.
+- **Impact if wrong:** none for the evaluation; the resource servers do not change when the issuer changes.
+
+## A19. Urgency view counts
+
+- **Ambiguity:** "active" patients are "all that are not in ALTA", but the view is built from events only.
+- **Decision:** `paciente_registrado` increments the level; `paciente_alta` decrements it; `paciente_en_consulta` and `paciente_escalado` do not change counts. The level never changes after registration, so the stored level is used on discharge. Unknown patients in a discharge event are ignored.
+- **Why:** keeps the Lua script small and idempotent.
+- **Impact if wrong:** if reclassification is added later, a `paciente_reclasificado` event type would be required.
+
+## A20. Dependencies outside the original stack
+
+- **Ambiguity:** `ARCHITECTURE.md` uses ArchUnit and BlockHound and tests need Redis, but `TECH_STACK.md` did not list them.
+- **Decision:** adopted. ArchUnit 1.5.1 and BlockHound 1.0.18.RELEASE are pinned in the version catalog (neither is managed by the Spring Boot BOM). Redis in tests uses a Testcontainers generic container, so no new library. `TECH_STACK.md` section 8 was updated.
+- **Why:** they prove the hexagonal rules and the "no blocking in the event loop" requirement automatically.
+- **Impact if wrong:** removing them only affects the architecture and non-blocking tests.
