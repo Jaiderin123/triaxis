@@ -15,6 +15,21 @@ spring:
       schema-locations: classpath:db/schema.sql
       # The whole script is sent as one statement, so the trigger function body is not split at its semicolons.
       separator: "^^^ END OF SCRIPT ^^^"
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    admin:
+      # Do not wait long for the topic check when the broker is down.
+      operation-timeout: 5s
+      fail-fast: false
+    producer:
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        enable.idempotence: true
+        request.timeout.ms: 10000
+        delivery.timeout.ms: 15000
+        max.block.ms: 5000
   jackson:
     deserialization:
       # Integers must not accept decimals (93.5 is rejected instead of silently truncated).
@@ -47,3 +62,12 @@ triage:
     - renovacion de recetario
     - vacunacion
     - seguimiento
+  outbox:
+    relay:
+      enabled: true
+      interval: PT1S
+      batch-size: 50
+      send-timeout: PT15S
+    topic:
+      partitions: 3
+      replicas: 1
