@@ -2,6 +2,33 @@
 
 Working checklist. Follow the phases in order; tick boxes as work lands. Source of the order and scope: [`ARCHITECTURE.md`](ARCHITECTURE.md) section 15. Assumptions are logged in [`ASSUMPTIONS.md`](ASSUMPTIONS.md).
 
+## Status
+
+| Phase | State | Tag |
+|---|---|---|
+| 0 Skeleton | done | `phase-0-skeleton` |
+| 1 Auth | done | `phase-1-auth` |
+| 2 Triage core | done | `phase-2-triage-core` |
+| 3 Events (outbox) | next | |
+| 4 Escalation | pending | |
+| 5 Assistant | pending | |
+| 6 Operation report | pending | |
+| 7 Alerts | pending | |
+| 8 Deployment | pending | |
+| 9 Docs | pending | |
+
+### Where to resume (phase 3)
+
+Branch from `develop` (`feat/...`) and open pull requests as described in `GIT_WORKFLOW.md`. Starting points for the events phase:
+
+- Event contract: `ARCHITECTURE.md` section 9 and ASSUMPTIONS A13; the records go in `triaxis-common`.
+- Outbox: `ARCHITECTURE.md` section 6.5. The outbox row is written in the same unit of work as the patient and the audit entry (`UnitOfWork` already wraps both; the transition and registration services are the place to add it). The relay must use `FOR UPDATE SKIP LOCKED`, a single relay in flight and `acks=all` with an idempotent producer.
+- Events to publish now: `paciente_registrado`, `paciente_en_consulta`, `paciente_alta` (`paciente_escalado` arrives with phase 4).
+- The audit `actor` and the Spanish event names stay separate: events are Spanish, audit values are internal English enums.
+- BlockHound and ArchUnit tests exist and must keep passing; the Kafka producer and the relay must not block the event loop.
+- Fallback if time is short: publish after commit with retry, and record it in the ADR (cut list item 3).
+- Still to write: ADRs 0001, 0002, 0005, 0006, 0007 and the others in the plan of `ARCHITECTURE.md` section 14.
+
 ## Cut list and priorities
 
 The scope is large. When a phase takes longer than expected, apply cuts from the list below instead of dropping core requirements.
