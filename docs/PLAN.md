@@ -9,25 +9,24 @@ Working checklist. Follow the phases in order; tick boxes as work lands. Source 
 | 0 Skeleton | done | `phase-0-skeleton` |
 | 1 Auth | done | `phase-1-auth` |
 | 2 Triage core | done | `phase-2-triage-core` |
-| 3 Events (outbox) | next | |
-| 4 Escalation | pending | |
+| 3 Events (outbox) | done | `phase-3-events` |
+| 4 Escalation | next | |
 | 5 Assistant | pending | |
 | 6 Operation report | pending | |
 | 7 Alerts | pending | |
 | 8 Deployment | pending | |
 | 9 Docs | pending | |
 
-### Where to resume (phase 3)
+### Where to resume (phase 4)
 
-Branch from `develop` (`feat/...`) and open pull requests as described in `GIT_WORKFLOW.md`. Starting points for the events phase:
+Branch from `develop` and open pull requests as in `GIT_WORKFLOW.md`. Starting points for escalation:
 
-- Event contract: `ARCHITECTURE.md` section 9 and ASSUMPTIONS A13; the records go in `triaxis-common`.
-- Outbox: `ARCHITECTURE.md` section 6.5. The outbox row is written in the same unit of work as the patient and the audit entry (`UnitOfWork` already wraps both; the transition and registration services are the place to add it). The relay must use `FOR UPDATE SKIP LOCKED`, a single relay in flight and `acks=all` with an idempotent producer.
-- Events to publish now: `paciente_registrado`, `paciente_en_consulta`, `paciente_alta` (`paciente_escalado` arrives with phase 4).
-- The audit `actor` and the Spanish event names stay separate: events are Spanish, audit values are internal English enums.
-- BlockHound and ArchUnit tests exist and must keep passing; the Kafka producer and the relay must not block the event loop.
-- Fallback if time is short: publish after commit with retry, and record it in the ADR (cut list item 3).
-- Still to write: ADRs 0001, 0002, 0005, 0006, 0007 and the others in the plan of `ARCHITECTURE.md` section 14.
+- The atomic statement is in `ARCHITECTURE.md` section 6.6: one `UPDATE ... RETURNING` with `FOR UPDATE SKIP LOCKED` over `REGISTERED` patients whose SLA expired and that are not escalated.
+- The audit entry (event type `ESCALATED`, same status before and after, actor `system`) and the outbox event `paciente_escalado` are written in the same transaction. `PatientEventType.ESCALATED`, `EventType.PACIENTE_ESCALADO` and the mapper entries already exist.
+- The interval, the batch size and the SLA per level are properties (`triage.sla.minutes`, plus new `triage.escalation.*`), so tests can use seconds. Time comes from `ClockPort`.
+- A patient who entered consultation or was discharged is never escalated, and a patient is escalated once (RN-03); the tests must cover the race with a concurrent `PATCH`.
+- A scheduler adapter goes in `infrastructure.adapter.in.scheduler`, next to the outbox scheduler; BlockHound and ArchUnit tests must keep passing.
+- Still to write: ADR 0006 (atomic escalation) and the ADRs of later phases.
 
 ## Cut list and priorities
 
@@ -138,9 +137,9 @@ Decisions (approved): full transactional outbox (not the publish-after-commit fa
 Tasks
 - [x] Event records in `triaxis-common` (`TriageEvent`, `EventType`, `EventLevel`, `EventStatus`; fields in Spanish, `version: 1`; topic and header names as constants) (`feat/events-contract`)
 - [x] `outbox_events` table (with `correlation_id`); patient, audit and outbox written in one transaction; `EventPublisher` port, domain `PatientEvent`, MapStruct mapper to the contract; `X-Correlation-Id` filter feeding the outbox (`feat/triage-outbox`)
-- [ ] `OutboxRelay`: batch poll with `FOR UPDATE SKIP LOCKED`, single relay in flight, `acks=all`, idempotent producer, key = patient id
-- [ ] Gauge `triage.outbox.pending`
-- [ ] Fallback if short on time: publish after commit with retry (cut list item 5); record it in the ADR
+- [x] `OutboxRelay`: batch poll with `FOR UPDATE SKIP LOCKED`, advisory lock (single relay in flight), `acks=all`, idempotent producer, key = patient id, headers `eventType` and `correlationId`; scheduler loop (`feat/triage-outbox-relay`)
+- [x] Gauge `triage.outbox.pending` plus counters `triage.outbox.published` and `triage.outbox.failures`
+- [x] Fallback not needed: the full outbox was built (ADR 0005); ADR 0001 explains Spring Kafka
 
 Modules: `triaxis-common`, `triaxis-triage-service`.
 
@@ -316,6 +315,14 @@ One entry per finished piece of work: what was done, decisions taken, how it was
 - **Verified:** `./gradlew build` passes on JDK 21 (domain, application, persistence with Testcontainers, API, security and non-blocking flow; three consecutive runs stable). Manual end-to-end check with the compose database and both services running: a token from auth (`nurse` and `doctor`) is accepted by triage; no token gives 401, a doctor registering gives 403, a doctor changing status works, an invalid transition gives 409, an invalid field gives 400 naming it, and the audit rows carry the right actors.
 - **Not verified yet:** events to Kafka (phase 3), escalation (phase 4), operation report (phase 6).
 - **Test infrastructure:** all integration tests share one annotation (`@TriageIntegrationTest`: real PostgreSQL and Kafka containers plus a test JWT decoder) so Spring reuses a single context; the web test client timeout is 30 seconds.
+
+### Phase 3: Events (done)
+
+- **What:** event contract in `triaxis-common` (`TriageEvent`, `EventType`, `EventLevel`, `EventStatus`, topic and header names); domain event `PatientEvent` and the `EventPublisher` port; `outbox_events` table written in the same unit of work as the patient and the audit entry; MapStruct mapper to the Spanish contract; `X-Correlation-Id` filter feeding the outbox; `OutboxRelay` (advisory lock, `FOR UPDATE SKIP LOCKED`, ordered sends, mark after acknowledgment, stop on the first failure) with a scheduler loop; producer with `acks=all` and idempotence; the topic is created at startup when missing; gauge and counters.
+- **Decisions:** full transactional outbox instead of the fallback (ADR 0005); Spring Kafka (ADR 0001); the relay lives in the triage service; correlation id per request, copied to the Kafka header; the relay loop is switched off in tests (`triage.outbox.relay.enabled=false`) and tests call `relayOnce()` so they are deterministic; the pending gauge is refreshed by the relay and never queries the database from the metrics thread.
+- **Verified:** `./gradlew build` passes on JDK 21 with real Kafka and PostgreSQL containers: contract serialization, one event per transition with the right type and level, rollback of the event with the unit of work, delivery with key, headers and payload, order per patient, one batch per cycle, no loss when Kafka is unreachable (the event stays pending and is delivered later), two relays at once send each event once, the periodic loop delivers and stops, the topic has three partitions, and the register flow is still clean under BlockHound.
+- **Manual check:** with the compose PostgreSQL and Kafka and both services running, a registration and a status change produced two messages on `triaje.eventos` (read with `kafka-console-consumer`) with the patient id as key, the headers `eventType` and `correlationId` (the one sent by the caller, or a generated one), the contract payload, and both outbox rows marked as published.
+- **Not verified yet:** a consumer built on these events (phase 5, the assistant) and the behavior of the relay across several replicas on a real cluster.
 
 ---
 
