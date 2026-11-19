@@ -4,6 +4,21 @@ server:
 spring:
   application:
     name: triaxis-triage-service
+  # Connection settings come from the environment (the local profile has development defaults).
+  r2dbc:
+    url: ${TRIAGE_DB_URL:}
+    username: ${TRIAGE_DB_USER:}
+    password: ${TRIAGE_DB_PASSWORD:}
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:db/schema.sql
+      # The whole script is sent as one statement, so the trigger function body is not split at its semicolons.
+      separator: "^^^ END OF SCRIPT ^^^"
+  jackson:
+    deserialization:
+      # Integers must not accept decimals (93.5 is rejected instead of silently truncated).
+      accept-float-as-int: false
 
 management:
   endpoint:

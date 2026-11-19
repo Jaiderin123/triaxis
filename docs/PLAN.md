@@ -85,10 +85,12 @@ Decisions (approved): validation lives in the domain and reports every violation
 
 Split into four pull requests: domain, application, persistence, API.
 
+Persistence notes: the schema is one idempotent script (`db/schema.sql`) that Spring Boot runs at startup as a single statement (custom `spring.sql.init.separator`), so the trigger function body is not split; the audit table references `patients` through a foreign key; database `CHECK` constraints mirror the domain ranges; connection settings come from `TRIAGE_DB_URL`, `TRIAGE_DB_USER` and `TRIAGE_DB_PASSWORD` (the `local` profile has the compose defaults); instants are stored as `TIMESTAMPTZ` and mapped through `OffsetDateTime` in UTC.
+
 Tasks
 - [x] Domain (`feat/triage-domain`): `TriageLevel`, `PatientStatus` with its transitions, `VitalSigns`, `RegistrationData`, `Patient`, `AuditEntry` and its event types, `TriageLevelRule` (one class per level), `TriageClassifier`, `ComplaintPolicy` (normalized exact match, configurable list), `SlaPolicy`, `StatusTransitionPolicy`, validation with field violations, domain exceptions
 - [x] Application (`feat/triage-application`): `RegisterPatientUseCase`, `ChangePatientStatusUseCase`, `GetPatientUseCase` (actor as an argument), output ports `PatientRepository`, `AuditRepository`, `ClockPort`, `TriageMetrics`, `UnitOfWork`; tests with fake ports
-- [ ] Persistence (`feat/triage-persistence`): idempotent schema script run at startup (`patients`, `patient_audit` with the actor and an append-only trigger, `CHECK` constraints, index), R2DBC adapters, conditional `UPDATE ... RETURNING`, transaction adapter, MapStruct entity mappers; add MapStruct to the version catalog
+- [x] Persistence (`feat/triage-persistence`): idempotent schema script run at startup (`patients`, `patient_audit` with the actor and an append-only trigger, `CHECK` constraints, index), R2DBC adapters, conditional `UPDATE ... RETURNING`, transaction adapter, MapStruct entity mappers; add MapStruct to the version catalog
 - [ ] API (`feat/triage-api`): `POST /triage/pacientes`, `PATCH /triage/pacientes/{id}/estado`, `GET /triage/pacientes/{id}`, request validation of JSON shape, MapStruct DTO mappers, `GlobalErrorHandler` (`ProblemDetail`: 400 naming the field, 404, 409), role rules through `AuthorizationRulesCustomizer`, metric `triage.classification`
 - [ ] Manual end-to-end check: compose infrastructure, auth and triage running, a token from auth used on triage
 

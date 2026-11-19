@@ -130,6 +130,17 @@ class ChangePatientStatusServiceTest {
 	}
 
 	@Test
+	void patientThatDisappearsAfterLosingTheRaceIsReportedAsNotFound() {
+		store.beforeUnitOfWork = () -> store.patients.remove(id);
+
+		StepVerifier.create(service.changeStatus(id, PatientStatus.IN_CONSULTATION, "doctor"))
+				.expectError(PatientNotFoundException.class)
+				.verify();
+
+		assertThat(store.audit).isEmpty();
+	}
+
+	@Test
 	void changeIsRolledBackWhenTheAuditEntryCannotBeWritten() {
 		store.failAudit = true;
 
