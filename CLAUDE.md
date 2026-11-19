@@ -11,7 +11,7 @@ Triaxis is a reactive digital triage system with a clinical assistant. Nurses re
 | Phased checklist (what to do next) | `docs/PLAN.md` |
 | Assumptions and ambiguities | `docs/ASSUMPTIONS.md` |
 | Git and commit conventions | `docs/GIT_WORKFLOW.md` |
-| Decision records | `docs/adr/` (README, `0000-template.md` and ADR 0013 exist) |
+| Decision records | `docs/adr/` (README, template and ADRs 0001, 0003, 0005, 0013, 0014 and 0015 exist; the rest of the plan is in `ARCHITECTURE.md` section 14) |
 | Original requirements (RF-xx, RN-xx), Spanish | `docs/private/ASSIGNMENT.md` (local only, git-ignored) |
 
 ## Modules
@@ -24,7 +24,7 @@ Triaxis is a reactive digital triage system with a clinical assistant. Nurses re
 | `triaxis-common` | n/a | Library: event contract records (`triaje.eventos`) |
 | `triaxis-security` | n/a | Library: shared resource-server (JWT) configuration |
 
-All five modules exist on Spring Boot 3.5.16 and `./gradlew build` passes. Done: auth service and shared security (phase 1) and the triage core with the audit (phase 2). Next: events and outbox (phase 3). The assistant and the Kafka parts are not started. See the status table in `docs/PLAN.md`.
+All five modules exist on Spring Boot 3.5.16 and `./gradlew build` passes. Done: auth service and shared security (phase 1), the triage core with the audit (phase 2) and the events through a transactional outbox with an ordered relay to Kafka (phase 3). Next: escalation (phase 4). The assistant (RAG and the urgency view) is not started. The status table and the resume notes are in `docs/PLAN.md`.
 
 ## Package layout (hexagonal, per service)
 
@@ -56,7 +56,7 @@ Reactive
 Correctness
 - State changes are conditional `UPDATE ... WHERE status = :expected`. Zero rows means re-read, then 404 or 409.
 - Escalation is one atomic `UPDATE ... RETURNING` with `FOR UPDATE SKIP LOCKED`; a patient is escalated at most once and never from `EN_CONSULTA` or `ALTA`.
-- Patient row, audit entry and outbox row are written in one transaction. Events go through the outbox (documented fallback: publish after commit with retry, recorded in an ADR).
+- Patient row, audit entry and outbox row are written in one transaction (done, ADR 0005). The relay delivers the outbox to Kafka in order; the relay loop is off in tests and they call `relayOnce()`.
 - The audit table is append-only and records the actor (JWT `sub`, or `system`). There is no delete endpoint.
 - Validation of business data lives in the domain; the web layer only checks JSON shape. Boundary mappers use MapStruct and only copy data.
 
@@ -84,7 +84,7 @@ Security and hygiene
 
 ## Commands
 
-Verified: `docker` exists on the dev machine. Everything else is not verified yet because no build has been run.
+`./gradlew build` is verified (JDK 21, Docker running for the Testcontainers tests). Commands marked unverified have not been run by hand.
 
 ```bash
 # JDK 21 (Temurin 21.0.10) is at ~/.jdks/temurin-21.0.10; the machine default is JDK 25.
@@ -95,9 +95,10 @@ export JAVA_HOME=$HOME/.jdks/temurin-21.0.10
 ./gradlew test                                    # tests only (unverified)
 ./gradlew :triaxis-triage-service:test            # one module (verified: passes, needs Docker running)
 ./gradlew :triaxis-triage-service:bootRun --args='--spring.profiles.active=local'   # triage on 8081, needs the compose PostgreSQL (verified)
-./gradlew :triaxis-assistant-service:bootRun      # assistant on 8082 (unverified)
+./gradlew :triaxis-assistant-service:bootRun      # assistant on 8082 (skeleton only, unverified)
 ./gradlew :triaxis-auth-service:bootRun --args='--spring.profiles.active=local'   # auth on 8083, demo users nurse/doctor (verified)
 docker compose up -d                              # PostgreSQL (pgvector), Kafka (topic triaje.eventos), Redis (verified); services are added in phase 8
+docker compose up -d postgres kafka kafka-init    # what the triage service needs to run with the relay (verified)
 kubectl apply -f deploy/k8s/                      # manifests (not created yet; kubectl 1.34.13 and kind 0.33.0 are in ~/.local/bin; az is not installed)
 ```
 
