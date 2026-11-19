@@ -34,6 +34,7 @@ _TODO_
 
 ## Author
 
-- Name: _TODO_
-- LinkedIn: _TODO_
-- GitHub: _TODO_
+- Name: Jaider Betancur Torres
+- LinkedIn: [jaiderbt](https://www.linkedin.com/in/jaiderbt/)
+- GitHub: [Jaiderin123](https://github.com/Jaiderin123)
+- Portfolio: [jaiderin123.github.io/portfolio](https://jaiderin123.github.io/portfolio)
