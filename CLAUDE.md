@@ -78,7 +78,8 @@ Security and hygiene
 2. Write tests first for domain logic (classifier E1 to E6, transitions, SLA, complaint matching).
 3. Keep commits small, with Conventional Commits (`feat:`, `fix:`, `test:`, `docs:`, `chore:`). Commit only when the user asks. Follow `docs/GIT_WORKFLOW.md`: work branches from `develop`, changes reach `develop` and `main` only through pull requests, never run a local `git merge` into them.
 4. Run `./gradlew build` before declaring a task done. Tick the box in `PLAN.md`.
-5. Record any new ambiguity or decision in `docs/ASSUMPTIONS.md`; write an ADR for architecture-level decisions.
+5. When a task or phase finishes, add an entry to the progress log at the end of `docs/PLAN.md` (what, decisions, verification, PRs). Treat it as the living specification.
+6. Record any new ambiguity or decision in `docs/ASSUMPTIONS.md`; write an ADR for architecture-level decisions.
 
 ## Commands
 
