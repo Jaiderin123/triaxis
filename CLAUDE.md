@@ -57,7 +57,8 @@ Correctness
 - State changes are conditional `UPDATE ... WHERE status = :expected`. Zero rows means re-read, then 404 or 409.
 - Escalation is one atomic `UPDATE ... RETURNING` with `FOR UPDATE SKIP LOCKED`; a patient is escalated at most once and never from `EN_CONSULTA` or `ALTA`.
 - Patient row, audit entry and outbox row are written in one transaction. Events go through the outbox (documented fallback: publish after commit with retry, recorded in an ADR).
-- The audit table is append-only. There is no delete endpoint.
+- The audit table is append-only and records the actor (JWT `sub`, or `system`). There is no delete endpoint.
+- Validation of business data lives in the domain; the web layer only checks JSON shape. Boundary mappers use MapStruct and only copy data.
 
 Assistant
 - When retrieval finds no relevant excerpt, answer with the fixed notice and do **not** call the LLM.

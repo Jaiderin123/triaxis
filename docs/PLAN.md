@@ -81,22 +81,22 @@ First commit: `feat(auth): issue RS256 tokens and expose JWKS`
 
 **Goal:** RF-01, RF-02, RN-01, RN-02, RN-04 working end to end without Kafka.
 
-Tasks (tests first for the domain)
-- [ ] `TriageClassifier` with one `TriageLevelRule` per level, `SlaPolicy`, administrative complaint normalization
-- [ ] `StatusTransitionPolicy` (enum state machine)
-- [ ] Init scripts for `patients` and `patient_audit` (append-only trigger), UTC session time zone
-- [ ] `RegisterPatientUseCase`, `ChangePatientStatusUseCase`, `GetPatientUseCase` with conditional `UPDATE`
-- [ ] ADR 0013 (state changes allowed to `NURSE` and `DOCTOR`) already drafted; keep it in sync with the security rules
-- [ ] Functional endpoints: `POST /triage/pacientes`, `PATCH /triage/pacientes/{id}/estado`, `GET /triage/pacientes/{id}`
-- [ ] `RequestValidator` (names the invalid field; decimals rejected for integer fields) and `GlobalErrorHandler` returning `ProblemDetail`
-- [ ] Role rules in the `SecurityWebFilterChain`
-- [ ] Metric `triage.classification` by level
+Decisions (approved): validation lives in the domain and reports every violation with its field name (the web layer only rejects malformed JSON and wrong types; decimals are rejected by turning off `accept-float-as-int`); database `CHECK` constraints as a safety net; boundary mappers use MapStruct 1.6.3 (ADR 0015) and only copy data; domain enums carry no external values, mappers convert `CRITICO`, `REGISTRADO` and so on; audit values are English enums and the audit stores the actor (JWT `sub`, or `system`) (ADR 0014); `PATCH` returns 200 with the full patient; the JSON never mixes languages (`fechaCambioEstado`, `tiempoEnEstadoSegundos`). See ASSUMPTIONS A22 to A25.
+
+Split into four pull requests: domain, application, persistence, API.
+
+Tasks
+- [x] Domain (`feat/triage-domain`): `TriageLevel`, `PatientStatus` with its transitions, `VitalSigns`, `RegistrationData`, `Patient`, `AuditEntry` and its event types, `TriageLevelRule` (one class per level), `TriageClassifier`, `ComplaintPolicy` (normalized exact match, configurable list), `SlaPolicy`, `StatusTransitionPolicy`, validation with field violations, domain exceptions
+- [ ] Application (`feat/triage-application`): `RegisterPatientUseCase`, `ChangePatientStatusUseCase`, `GetPatientUseCase` (actor as an argument), output ports `PatientRepository`, `AuditRepository`, `ClockPort`, `TriageMetrics`, `UnitOfWork`; tests with fake ports
+- [ ] Persistence (`feat/triage-persistence`): idempotent schema script run at startup (`patients`, `patient_audit` with the actor and an append-only trigger, `CHECK` constraints, index), R2DBC adapters, conditional `UPDATE ... RETURNING`, transaction adapter, MapStruct entity mappers; add MapStruct to the version catalog
+- [ ] API (`feat/triage-api`): `POST /triage/pacientes`, `PATCH /triage/pacientes/{id}/estado`, `GET /triage/pacientes/{id}`, request validation of JSON shape, MapStruct DTO mappers, `GlobalErrorHandler` (`ProblemDetail`: 400 naming the field, 404, 409), role rules through `AuthorizationRulesCustomizer`, metric `triage.classification`
+- [ ] Manual end-to-end check: compose infrastructure, auth and triage running, a token from auth used on triage
 
 Modules: `triaxis-triage-service`.
 
-Tests that must exist: BlockHound proves no blocking call in the register flow; E1 to E6 and boundary values (HR 40 and 120, SpO2 89, 90, 93, 94, systolic 89, 90, 100, 101, temp 38.0 and 38.5, GCS 8, 9, 13, 14); valid and invalid transitions (409), unknown patient (404); validation for every range in the specification; concurrent `PATCH` (only one wins); audit written for each change.
+Tests that must exist: BlockHound proves no blocking call in the register flow; E1 to E6 and boundary values (HR 40 and 120, SpO2 89, 90, 93 and 94, systolic 89, 90, 100 and 101, temperature 38.0 and 38.5, GCS 8, 9, 13 and 14); complaint normalization; all nine transitions; every range of RF-01 including diastolic below systolic; concurrent `PATCH` (only one wins); audit rejects `UPDATE` and `DELETE`; schema script runs twice; 401, 403 and 200 per role; a real signed token accepted; ArchUnit.
 
-Definition of done: `./gradlew :triaxis-triage-service:test` green, including Testcontainers PostgreSQL tests.
+Definition of done: `./gradlew :triaxis-triage-service:test` green, including Testcontainers PostgreSQL tests, plus the manual end-to-end check.
 
 First commit: `feat(triage): classify and register patients with audited state flow`
 
@@ -276,4 +276,14 @@ One entry per finished piece of work: what was done, decisions taken, how it was
 - **PEM key:** `JWT_PRIVATE_KEY` loading is covered by `SigningKeyProviderTest` (PKCS#8 PEM, one-line form with escaped newlines, same key id across restarts, token verified against the published JWKS, refusal to start without a key, invalid PEM).
 - **Not verified yet:** a token against a real triage endpoint (triage has no protected routes until phase 2).
 - **Run locally:** `./gradlew :triaxis-auth-service:bootRun --args='--spring.profiles.active=local'`.
+
+---
+
+## Improvements (out of scope for now)
+
+Ideas that were consciously left out of the first delivery:
+
+- Read endpoint for the clinical audit (`GET /triage/pacientes/{id}/auditoria`); the audit is written and protected, but only readable through the database.
+- Custom `ProblemDetail` bodies for 401 and 403 responses coming from Spring Security.
+- Key rotation procedure for the JWT signing key and token revocation.
 

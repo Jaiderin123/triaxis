@@ -138,3 +138,31 @@ A1 to A4 come from `ARCHITECTURE.md` section 6.2. A5 onward were added while pre
 - **Decision:** adopted. ArchUnit 1.5.1 and BlockHound 1.0.18.RELEASE are pinned in the version catalog (neither is managed by the Spring Boot BOM). Redis in tests uses a Testcontainers generic container, so no new library. `TECH_STACK.md` section 8 was updated.
 - **Why:** they prove the hexagonal rules and the "no blocking in the event loop" requirement automatically.
 - **Impact if wrong:** removing them only affects the architecture and non-blocking tests.
+
+## A22. Audit records the author of each change
+
+- **Ambiguity:** RN-04 lists the fields to record but not who made the change.
+- **Decision:** `patient_audit` also stores `actor`: the JWT `sub` of the caller, or `system` for the escalation scheduler. See ADR 0014.
+- **Why:** both roles can change a patient's state (ADR 0013) and a clinical audit without an author is of little use.
+- **Impact if wrong:** an extra column; it is easy to ignore if a reviewer does not want it.
+
+## A23. Validation lives in the domain
+
+- **Ambiguity:** where the RF-01 validation rules are enforced.
+- **Decision:** the domain validates registration data and reports every violation with its field name; the web layer only rejects malformed JSON and wrong types (decimals where integers are expected). Database `CHECK` constraints are a second safety net. The 400 response uses the external (Spanish) field names.
+- **Why:** one source of truth, no framework in the domain.
+- **Impact if wrong:** moving to Bean Validation in the DTOs would duplicate the rules.
+
+## A24. Chief complaint length
+
+- **Ambiguity:** the specification gives a range for every field except the chief complaint, which is only "text".
+- **Decision:** required, non-blank, at most 500 characters.
+- **Why:** an unbounded text field invites abuse; 500 characters are enough for a complaint.
+- **Impact if wrong:** a longer complaint is rejected with 400 naming `quejaPrincipal`.
+
+## A25. Response shapes of the triage API
+
+- **Ambiguity:** the specification names a few response fields and leaves the rest open.
+- **Decision:** `POST` returns 201 with `id`, `nivel`, `slaMinutos`, `estado`, `fechaRegistro` and a `Location` header. `GET` returns the full patient (request fields plus `nivel`, `slaMinutos`, `estado`, `escalado`, `fechaRegistro`, `fechaCambioEstado` and `tiempoEnEstadoSegundos`). `PATCH` returns 200 with the same body as `GET`. Field names stay in Spanish, so the JSON never mixes languages.
+- **Why:** consistent contract, and the time in the current state is exact enough to test.
+- **Impact if wrong:** a client expecting 204 on `PATCH` ignores the body; renaming is a DTO change.

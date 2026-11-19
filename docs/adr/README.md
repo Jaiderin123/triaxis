@@ -17,3 +17,5 @@ Ambiguities in the requirements specification that change behavior are recorded 
 | 0000 | [Template](0000-template.md) | n/a |
 | 0003 | [Separate identity service with RS256 and JWKS](0003-identity-service-rs256-jwks.md) | Accepted |
 | 0013 | [Who may change a patient's state](0013-state-change-roles.md) | Accepted |
+| 0014 | [Clinical audit trail](0014-clinical-audit-trail.md) | Accepted |
+| 0015 | [MapStruct for boundary mappers](0015-mapstruct-boundary-mappers.md) | Accepted |

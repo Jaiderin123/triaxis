@@ -35,7 +35,7 @@ Backend only. No frontend.
 | RN-01 Classification by level | `TriageClassifier` |
 | RN-02 SLA per level | `SlaPolicy` (configurable) |
 | RN-03 Escalation idempotency | Conditional `UPDATE`, `FOR UPDATE SKIP LOCKED` |
-| RN-04 Clinical audit | `patient_audit` table, append-only, no delete endpoint |
+| RN-04 Clinical audit | `patient_audit` table with the actor, append-only, no delete endpoint (ADR 0014) |
 | RN-05 Anti-hallucination | Retrieval threshold + validated citations (see 7.2) |
 | Resilience4j on the LLM | `assistant-service`: circuit breaker, timeout, 503 fallback |
 | Observability | Actuator probes, Micrometer metrics, structured logs with correlation id |
@@ -157,7 +157,7 @@ dev.triaxis.triage
 │   │   │   ├── router       PatientRouter, ReportRouter           (RouterFunction beans)
 │   │   │   ├── handler      PatientHandler, ReportHandler
 │   │   │   ├── dto          request and response records (Spanish external names)
-│   │   │   ├── mapper       DTO <-> domain
+│   │   │   ├── mapper       MapStruct: DTO <-> command and domain <-> response
 │   │   │   ├── validation   RequestValidator
 │   │   │   └── error        GlobalErrorHandler (WebExceptionHandler)
 │   │   ├── scheduler        EscalationScheduler
@@ -299,6 +299,7 @@ CREATE INDEX idx_patients_sla ON patients (status, escalated, registered_at);
 CREATE TABLE patient_audit (
   id              BIGSERIAL PRIMARY KEY,
   patient_id      UUID NOT NULL,
+  actor           VARCHAR(100) NOT NULL,   -- JWT subject, or 'system' for the scheduler
   event_type      VARCHAR(32) NOT NULL,
   previous_status VARCHAR(16),
   new_status      VARCHAR(16) NOT NULL,
@@ -652,6 +653,8 @@ Minimum coverage required: classification E1 to E6, valid and invalid transition
 | 0011 | Alert channel for escalated patients |
 | 0012 | Functional endpoints (`RouterFunction`) instead of annotated controllers |
 | 0013 | Who may change a patient's state (`NURSE` and `DOCTOR`), an ambiguity of the specification |
+| 0014 | Clinical audit trail: append-only table written in the same transaction, with the actor |
+| 0015 | MapStruct for boundary mappers |
 
 At least two are required; the more concrete ones (0001, 0002, 0006, 0007) are the priority.
 
