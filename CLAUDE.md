@@ -95,7 +95,7 @@ export JAVA_HOME=$HOME/.jdks/temurin-21.0.10
 ./gradlew :triaxis-triage-service:bootRun         # triage on 8081 (unverified)
 ./gradlew :triaxis-assistant-service:bootRun      # assistant on 8082 (unverified)
 ./gradlew :triaxis-auth-service:bootRun           # auth on 8083 (unverified)
-docker compose up --build                         # whole system (compose file not created yet)
+docker compose up -d                              # PostgreSQL (pgvector), Kafka (topic triaje.eventos), Redis (verified); services are added in phase 8
 kubectl apply -f deploy/k8s/                      # manifests (not created yet; kubectl 1.34.13 and kind 0.33.0 are in ~/.local/bin; az is not installed)
 ```
 
