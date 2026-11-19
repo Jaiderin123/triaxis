@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import dev.triaxis.triage.TestcontainersConfiguration;
+import dev.triaxis.triage.TriageIntegrationTest;
 import dev.triaxis.triage.application.service.ChangePatientStatusService;
 import dev.triaxis.triage.domain.exception.ConcurrentStatusChangeException;
 import dev.triaxis.triage.domain.exception.InvalidStatusTransitionException;
@@ -14,16 +14,13 @@ import dev.triaxis.triage.domain.model.PatientStatus;
 import dev.triaxis.triage.domain.service.StatusTransitionPolicy;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.r2dbc.core.DatabaseClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@SpringBootTest
-@Import(TestcontainersConfiguration.class)
+@TriageIntegrationTest
 class ConcurrentStatusChangeTest {
 
 	@Autowired

@@ -19,6 +19,9 @@ spring:
     deserialization:
       # Integers must not accept decimals (93.5 is rejected instead of silently truncated).
       accept-float-as-int: false
+    mapper:
+      # No silent conversion of strings into numbers.
+      allow-coercion-of-scalars: false
 
 management:
   endpoint:
@@ -29,3 +32,18 @@ management:
 triaxis:
   security:
     jwks-uri: ${AUTH_JWKS_URI:http://localhost:8083/.well-known/jwks.json}
+
+triage:
+  sla:
+    minutes:
+      CRITICAL: 5
+      URGENT: 10
+      URGENT_2: 30
+      NOT_URGENT: 60
+      NOT_URGENT_2: 120
+  administrative-complaints:
+    - documentos
+    - recoleccion de resultados
+    - renovacion de recetario
+    - vacunacion
+    - seguimiento

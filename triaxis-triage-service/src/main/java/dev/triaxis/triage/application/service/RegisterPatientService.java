@@ -42,8 +42,8 @@ public class RegisterPatientService implements RegisterPatientUseCase {
 
 	@Override
 	public Mono<Patient> register(RegistrationData data, String actor) {
-		return Mono.defer(() -> {
-			Patient patient = Patient.register(ids.next(), data, classifier, sla, clock.now());
+		return ids.next().flatMap(id -> {
+			Patient patient = Patient.register(id, data, classifier, sla, clock.now());
 			return unitOfWork.execute(patients.save(patient)
 					.flatMap(saved -> audit.append(new AuditEntry(saved.id(), actor, AuditEventType.REGISTERED,
 							null, PatientStatus.REGISTERED, saved.escalated(), saved.registeredAt()))

@@ -163,6 +163,6 @@ A1 to A4 come from `ARCHITECTURE.md` section 6.2. A5 onward were added while pre
 ## A25. Response shapes of the triage API
 
 - **Ambiguity:** the specification names a few response fields and leaves the rest open.
-- **Decision:** `POST` returns 201 with `id`, `nivel`, `slaMinutos`, `estado`, `fechaRegistro` and a `Location` header. `GET` returns the full patient (request fields plus `nivel`, `slaMinutos`, `estado`, `escalado`, `fechaRegistro`, `fechaCambioEstado` and `tiempoEnEstadoSegundos`). `PATCH` returns 200 with the same body as `GET`. Field names stay in Spanish, so the JSON never mixes languages.
+- **Decision:** `POST` returns 201 with `id`, `nivel`, `slaMinutos`, `estado`, `fechaRegistro` and a `Location` header. `GET` returns the full patient (request fields plus `nivel`, `slaMinutos`, `estado`, `escalado`, `fechaRegistro`, `fechaCambioEstado` and `tiempoEnEstadoSegundos`). `PATCH` returns 200 with the same body as `GET`. Field names stay in Spanish, so the JSON never mixes languages. Error bodies are standard `ProblemDetail` (English text); validation errors add an `errores` list with `campo` (the external field name) and `mensaje`.
 - **Why:** consistent contract, and the time in the current state is exact enough to test.
 - **Impact if wrong:** a client expecting 204 on `PATCH` ignores the body; renaming is a DTO change.

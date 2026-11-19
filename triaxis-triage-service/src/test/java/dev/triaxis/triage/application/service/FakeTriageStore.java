@@ -90,8 +90,8 @@ class FakeTriageStore implements PatientRepository, AuditRepository, ClockPort, 
 	}
 
 	@Override
-	public UUID next() {
-		return nextId;
+	public Mono<UUID> next() {
+		return Mono.just(nextId);
 	}
 
 	@Override
