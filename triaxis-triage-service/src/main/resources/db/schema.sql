@@ -69,3 +69,17 @@ DROP TRIGGER IF EXISTS patient_audit_no_truncate ON patient_audit;
 CREATE TRIGGER patient_audit_no_truncate
   BEFORE TRUNCATE ON patient_audit
   FOR EACH STATEMENT EXECUTE FUNCTION reject_audit_change();
+
+-- Transactional outbox: events are written with the change that causes them and a relay delivers them to Kafka.
+CREATE TABLE IF NOT EXISTS outbox_events (
+  id             BIGSERIAL PRIMARY KEY,
+  event_id       UUID NOT NULL UNIQUE,
+  message_key    VARCHAR(64) NOT NULL,
+  event_type     VARCHAR(32) NOT NULL,
+  correlation_id VARCHAR(64),
+  payload        JSONB NOT NULL,
+  created_at     TIMESTAMPTZ NOT NULL,
+  published_at   TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_outbox_pending ON outbox_events (id) WHERE published_at IS NULL;

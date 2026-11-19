@@ -6,6 +6,8 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import dev.triaxis.triage.TriageIntegrationTest;
+import dev.triaxis.triage.application.port.out.EventPublisher;
+import dev.triaxis.triage.application.port.out.IdGenerator;
 import dev.triaxis.triage.application.service.ChangePatientStatusService;
 import dev.triaxis.triage.domain.exception.ConcurrentStatusChangeException;
 import dev.triaxis.triage.domain.exception.InvalidStatusTransitionException;
@@ -33,12 +35,18 @@ class ConcurrentStatusChangeTest {
 	TransactionalUnitOfWork unitOfWork;
 
 	@Autowired
+	EventPublisher events;
+
+	@Autowired
+	IdGenerator ids;
+
+	@Autowired
 	DatabaseClient client;
 
 	@Test
 	void onlyOneOfTwoSimultaneousRequestsWins() {
-		ChangePatientStatusService service = new ChangePatientStatusService(patients, audit, Instant::now, unitOfWork,
-				new StatusTransitionPolicy());
+		ChangePatientStatusService service = new ChangePatientStatusService(patients, audit, events, ids, Instant::now,
+				unitOfWork, new StatusTransitionPolicy());
 		AtomicInteger successes = new AtomicInteger();
 		AtomicInteger conflicts = new AtomicInteger();
 
@@ -63,6 +71,9 @@ class ConcurrentStatusChangeTest {
 					WHERE patient_id = :id AND event_type = 'CONSULTATION_STARTED'
 					""").bind("id", patient.id()).map(row -> row.get("total", Long.class)).one().block();
 			assertThat(consultationEntries).as("audit entries in round %d", round).isEqualTo(1);
+			long consultationEvents = client.sql("SELECT count(*) AS total FROM outbox_events WHERE message_key = :id AND event_type = 'paciente_en_consulta'")
+					.bind("id", patient.id().toString()).map(row -> row.get("total", Long.class)).one().block();
+			assertThat(consultationEvents).as("outbox events in round %d", round).isEqualTo(1);
 			assertThat(patients.findById(patient.id()).block().status()).isEqualTo(PatientStatus.IN_CONSULTATION);
 		}
 

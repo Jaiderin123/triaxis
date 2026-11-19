@@ -3,6 +3,7 @@ package dev.triaxis.triage.application.service;
 import dev.triaxis.triage.application.port.in.RegisterPatientUseCase;
 import dev.triaxis.triage.application.port.out.AuditRepository;
 import dev.triaxis.triage.application.port.out.ClockPort;
+import dev.triaxis.triage.application.port.out.EventPublisher;
 import dev.triaxis.triage.application.port.out.IdGenerator;
 import dev.triaxis.triage.application.port.out.PatientRepository;
 import dev.triaxis.triage.application.port.out.TriageMetrics;
@@ -10,6 +11,7 @@ import dev.triaxis.triage.application.port.out.UnitOfWork;
 import dev.triaxis.triage.domain.model.AuditEntry;
 import dev.triaxis.triage.domain.model.AuditEventType;
 import dev.triaxis.triage.domain.model.Patient;
+import dev.triaxis.triage.domain.model.PatientEvent;
 import dev.triaxis.triage.domain.model.PatientStatus;
 import dev.triaxis.triage.domain.model.RegistrationData;
 import dev.triaxis.triage.domain.service.SlaPolicy;
@@ -20,6 +22,7 @@ public class RegisterPatientService implements RegisterPatientUseCase {
 
 	private final PatientRepository patients;
 	private final AuditRepository audit;
+	private final EventPublisher events;
 	private final ClockPort clock;
 	private final IdGenerator ids;
 	private final UnitOfWork unitOfWork;
@@ -27,11 +30,12 @@ public class RegisterPatientService implements RegisterPatientUseCase {
 	private final TriageClassifier classifier;
 	private final SlaPolicy sla;
 
-	public RegisterPatientService(PatientRepository patients, AuditRepository audit, ClockPort clock,
-			IdGenerator ids, UnitOfWork unitOfWork, TriageMetrics metrics, TriageClassifier classifier,
+	public RegisterPatientService(PatientRepository patients, AuditRepository audit, EventPublisher events,
+			ClockPort clock, IdGenerator ids, UnitOfWork unitOfWork, TriageMetrics metrics, TriageClassifier classifier,
 			SlaPolicy sla) {
 		this.patients = patients;
 		this.audit = audit;
+		this.events = events;
 		this.clock = clock;
 		this.ids = ids;
 		this.unitOfWork = unitOfWork;
@@ -47,6 +51,8 @@ public class RegisterPatientService implements RegisterPatientUseCase {
 			return unitOfWork.execute(patients.save(patient)
 					.flatMap(saved -> audit.append(new AuditEntry(saved.id(), actor, AuditEventType.REGISTERED,
 							null, PatientStatus.REGISTERED, saved.escalated(), saved.registeredAt()))
+							.then(ids.next())
+							.flatMap(eventId -> events.publish(PatientEvent.registered(eventId, saved)))
 							.thenReturn(saved)));
 		}).doOnSuccess(saved -> {
 			if (saved != null) {
