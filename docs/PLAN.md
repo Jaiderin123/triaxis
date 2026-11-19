@@ -133,8 +133,10 @@ First commit: `feat(triage): classify and register patients with audited state f
 
 **Goal:** every state change is published to `triaje.eventos` reliably.
 
+Decisions (approved): full transactional outbox (not the publish-after-commit fallback); the relay lives inside `triaxis-triage-service` as an input adapter (scheduler); a `correlationId` is generated per request, stored in the outbox row and sent as a Kafka header. Domain events go through an `EventPublisher` port and the adapter maps them to the contract with MapStruct. Planned pull requests: contract, outbox writing, relay with producer and gauge, then docs (ADR 0001 and 0005).
+
 Tasks
-- [ ] Event records in `triaxis-common` (fields in Spanish, `version: 1`, headers `correlationId` and `eventType`)
+- [x] Event records in `triaxis-common` (`TriageEvent`, `EventType`, `EventLevel`, `EventStatus`; fields in Spanish, `version: 1`; topic and header names as constants) (`feat/events-contract`)
 - [ ] `outbox_events` table; patient, audit and outbox written in one transaction (`TransactionalOperator`)
 - [ ] `OutboxRelay`: batch poll with `FOR UPDATE SKIP LOCKED`, single relay in flight, `acks=all`, idempotent producer, key = patient id
 - [ ] Gauge `triage.outbox.pending`
