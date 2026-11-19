@@ -75,6 +75,7 @@ The name must be checked on GitHub and Google before publishing, to avoid clashi
 | Infrastructure | Testcontainers (PostgreSQL, Kafka) |
 | LLM | Mocked (never real calls in tests) |
 | Coverage | JaCoCo |
+| Mapping | MapStruct **1.6.3** (latest stable; 1.7 is still beta) | Generated mappers at the boundaries: DTO to command, entity to domain, domain to response |
 | Architecture rules | ArchUnit **1.5.1**: enforces the hexagonal dependency rules (domain, application, infrastructure) |
 | Non-blocking proof | BlockHound **1.0.18.RELEASE**: fails a test if a blocking call runs on an event-loop thread |
 | Redis in tests | Testcontainers generic Redis container (`redis` image, pinned tag); no extra library |
@@ -97,7 +98,7 @@ Pin explicitly only:
 1. The Spring Boot Gradle plugin (3.5.16).
 2. The Spring AI BOM.
 3. Resilience4j.
-4. ArchUnit and BlockHound (checked: neither is managed by the Spring Boot 3.5.16 BOM).
+4. ArchUnit, BlockHound and MapStruct (checked: none is managed by the Spring Boot 3.5.16 BOM).
 5. Docker image tags.
 
 BlockHound on JDK 13+ may need the JVM flag `-XX:+AllowRedefinitionToAddDeleteMethods` in the test task (not verified yet).
