@@ -1,0 +1,6 @@
+# Local development profile: matches the docker-compose defaults (never reuse these values elsewhere).
+spring:
+  r2dbc:
+    url: r2dbc:postgresql://localhost:5432/triage
+    username: triaxis
+    password: triaxis
