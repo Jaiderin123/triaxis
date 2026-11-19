@@ -1,0 +1,12 @@
+# Local development profile. The users below are demonstration accounts only
+# (passwords: nurse-demo and doctor-demo); never reuse them outside local runs.
+auth:
+  jwt:
+    generate-key-if-missing: true
+  users:
+    - username: nurse
+      password-hash: "$2a$10$NbaiOfDs1vyhQwwIGczMeedwqNa32Zvrc235tMisVMKkEBpnAlNmq"
+      roles: [NURSE]
+    - username: doctor
+      password-hash: "$2a$10$GnQPXp5gAWXuTJVovHGY5u.yfjJBmSPtZ/pByA9ewIyLx9AONMJaa"
+      roles: [DOCTOR]

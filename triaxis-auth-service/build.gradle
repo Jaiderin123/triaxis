@@ -11,10 +11,12 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-security'
 	implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
+	implementation 'com.nimbusds:nimbus-jose-jwt'
 
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	testImplementation 'io.projectreactor:reactor-test'
 	testImplementation 'org.springframework.security:spring-security-test'
+	testImplementation project(':triaxis-security')
 	testImplementation libs.archunit.junit5
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
