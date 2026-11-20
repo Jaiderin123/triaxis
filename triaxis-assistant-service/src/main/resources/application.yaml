@@ -11,6 +11,31 @@ spring:
     timeout-per-shutdown-phase: 20s
   codec:
     max-in-memory-size: 64KB
+  # Connection settings come from the environment (the local profile has development defaults).
+  r2dbc:
+    url: ${ASSISTANT_DB_URL:}
+    username: ${ASSISTANT_DB_USER:}
+    password: ${ASSISTANT_DB_PASSWORD:}
+  autoconfigure:
+    # This Spring AI auto-configuration ignores spring.ai.model.embedding.text and asks for Gemini credentials
+    # even when Gemini is not used; the gemini profile includes it again.
+    exclude: org.springframework.ai.model.google.genai.autoconfigure.embedding.GoogleGenAiEmbeddingConnectionAutoConfiguration
+  ai:
+    model:
+      # Spring AI auto-configuration of Gemini is off; the gemini profile turns it on (ADR 0008).
+      chat: none
+      embedding:
+        text: none
+  jackson:
+    mapper:
+      # No silent conversion of numbers or booleans into the question text.
+      allow-coercion-of-scalars: false
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:db/schema.sql
+      # The whole script is sent as one statement.
+      separator: "^^^ END OF SCRIPT ^^^"
 
 logging:
   structured:
@@ -32,7 +57,7 @@ management:
         enabled: true
       group:
         readiness:
-          include: readinessState
+          include: readinessState,r2dbc
   metrics:
     tags:
       application: ${spring.application.name}
@@ -54,3 +79,38 @@ triaxis:
       password: ${METRICS_PASSWORD:}
   security:
     jwks-uri: ${AUTH_JWKS_URI:http://localhost:8083/.well-known/jwks.json}
+
+assistant:
+  llm:
+    # mock (default: no key, deterministic) or gemini (use the gemini profile, which also sets this).
+    provider: mock
+    timeout:
+      embedding: PT5S
+      answer: PT20S
+      retry-after: PT30S
+  rag:
+    top-k: 4
+    # Calibrated for the mock embedding with the three sample questions: the relevant sections are at 0.47 and
+    # 0.60, the closest section to the diabetes question at 0.82 (ASSUMPTIONS A36).
+    max-distance: 0.70
+    question-max-length: 1000
+  corpus:
+    location: classpath:/protocols/
+    retry:
+      initial-backoff: PT2S
+      max-backoff: PT1M
+
+# Circuit breaker of the language model calls (ADR 0004): it opens when half of the last ten calls failed (at
+# least five calls), stays open 30 seconds, then lets three trial calls through.
+resilience4j:
+  circuitbreaker:
+    instances:
+      llm:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+

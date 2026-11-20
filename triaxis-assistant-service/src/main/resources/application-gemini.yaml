@@ -1,0 +1,35 @@
+# Gemini as the LLM and embedding provider (ADR 0008). The key comes only from the environment.
+# Models checked against the API on 2026-11-19 (free tier); they are properties.
+spring:
+  autoconfigure:
+    exclude: ""
+  ai:
+    model:
+      chat: google-genai
+      embedding:
+        text: google-genai
+    google:
+      genai:
+        api-key: ${GEMINI_API_KEY}
+        chat:
+          options:
+            model: ${GEMINI_CHAT_MODEL:gemini-2.5-flash}
+            temperature: 0.0
+            response-mime-type: application/json
+            # No thinking: the model only summarizes the excerpts it gets; thinking added up to 15 seconds.
+            thinking-budget: 0
+        embedding:
+          api-key: ${GEMINI_API_KEY}
+          text:
+            options:
+              model: ${GEMINI_EMBEDDING_MODEL:gemini-embedding-001}
+              dimensions: 768
+              task-type: SEMANTIC_SIMILARITY
+
+assistant:
+  llm:
+    provider: gemini
+  rag:
+    # Calibrated with gemini-embedding-001 (768 dimensions): questions covered by the corpus are at most 0.29 from
+    # their section, questions outside it at least 0.37 (diabetes 0.45). See ASSUMPTIONS A36.
+    max-distance: 0.33

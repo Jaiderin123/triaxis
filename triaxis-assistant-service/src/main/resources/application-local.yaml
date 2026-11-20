@@ -1,0 +1,17 @@
+# Local development profile: matches the docker-compose defaults (never reuse these values elsewhere).
+spring:
+  r2dbc:
+    url: r2dbc:postgresql://localhost:5432/assistant
+    username: triaxis
+    password: triaxis
+
+# Readable logs while developing (the default is JSON), and a development password for the metrics endpoint.
+logging:
+  structured:
+    format:
+      console: ""
+
+triaxis:
+  web:
+    metrics:
+      password: metrics-local
