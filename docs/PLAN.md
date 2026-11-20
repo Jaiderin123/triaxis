@@ -12,13 +12,17 @@ Working checklist. Follow the phases in order; tick boxes as work lands. Source 
 | 3 Events (outbox) | done | `phase-3-events` |
 | Platform foundation (errors, observability, hardening) | done | `platform-foundation` |
 | 4 Escalation | in review (pull request to `develop`; tag `phase-4-escalation` after the release) | |
-| 5 Assistant | next | |
+| 5 Assistant | in progress (RAG merged; urgency view next) | |
 | 6 Operation report | pending | |
 | 7 Alerts | pending | |
 | 8 Deployment | pending | |
 | 9 Docs | pending | |
 
-### Where to resume (phase 5)
+### Where to resume (phase 5, pull request 2)
+
+The RAG part of phase 5 is merged. Next is the urgency view on `feat/assistant-urgency-view` (Kafka listener, Lua script of ADR 0021, `GET /asistente/estado-urgencias`), then the release of phases 4 and 5 to `main` with their tags.
+
+### Earlier notes (phase 4 release and the start of phase 5)
 
 Phase 4 is built on `feat/phase-4-escalation` and goes to `develop` through its pull request, then to `main` with a merge commit and the tag `phase-4-escalation`. After that, branch `feat/phase-5-assistant` from `develop`. Starting points for the assistant:
 
@@ -192,15 +196,16 @@ Decisions (approved, not started yet):
 - Test containers: `pgvector/pgvector:pg16` (the same image as compose) and `redis:7.4-alpine`, through Testcontainers generic containers; no new test library.
 
 Pull request 1: RAG (`feat/assistant-rag`)
-- [ ] Protocol files PROTO-001 to PROTO-003 in `src/main/resources/protocols/`; parser into sections
-- [ ] Schema `protocol_chunks` (untyped `vector`), idempotent ingestion; custom R2DBC repository with `<=>` (ADR 0002)
-- [ ] `LlmPort` (embedding and structured answer); `mock` adapter (default) and Gemini adapter with the starters; blocking calls on `boundedElastic`
-- [ ] `AskClinicalQuestionUseCase`: embed, retrieve, threshold gate, numbered prompt, structured output, citation validation, sources from metadata (ADR 0007)
-- [ ] `ResilientClinicalAnswerGenerator` decorator: circuit breaker, time limiter, 503 (ADR 0004)
-- [ ] `POST /asistente/consulta` (functional endpoint, MapStruct DTO mapper, global error handler on the shared base, role rule)
-- [ ] Metrics `assistant.llm.latency`, `assistant.answers` by outcome (`answered`, `no_protocol`, `rejected`, `degraded`), breaker state
-- [ ] Calibrate `assistant.rag.max-distance` of the `mock` provider with the three sample questions
-- [ ] ADR 0008 (Gemini, `mock`, discarded providers)
+- [x] Protocol files PROTO-001 to PROTO-003 in `src/main/resources/protocols/`; parser into sections
+- [x] Schema `protocol_chunks` (untyped `vector`), idempotent ingestion; custom R2DBC repository with `<=>` (ADR 0002)
+- [x] `LlmPort` (embedding and structured answer); `mock` adapter (default) and Gemini adapter with the starters; blocking calls on `boundedElastic`
+- [x] `AskClinicalQuestionUseCase`: embed, retrieve, threshold gate, numbered prompt, structured output, citation validation, sources from metadata (ADR 0007)
+- [x] `ResilientLlmAdapter` decorator: circuit breaker, timeouts, 503 with `Retry-After` (ADR 0004)
+- [x] `POST /asistente/consulta` (functional endpoint, MapStruct DTO mapper, global error handler on the shared base, role rule)
+- [x] Metrics `assistant.llm.latency`, `assistant.answers` by outcome (`answered`, `no_protocol`, `rejected`, `degraded`), breaker state
+- [x] Calibrate `assistant.rag.max-distance` of the `mock` provider with the three sample questions (0.70)
+- [x] ADR 0008 (Gemini, `mock`, discarded providers)
+- [x] With a real Gemini key (added during the phase): models checked, threshold calibrated (0.33), end-to-end check through the endpoint (A36)
 
 Pull request 2: urgency view (`feat/assistant-urgency-view`)
 - [ ] Kafka listener (group `assistant-urgency-view`, manual acknowledgment after the script), Lua script with the rules of ADR 0021
@@ -373,6 +378,34 @@ One entry per finished piece of work: what was done, decisions taken, how it was
 - **Tests:** domain (strict limit, statuses, already escalated, the escalation keeps the status); use case with fake ports (audit, event, metric, second run, oldest first and batch size, rollback when the audit or the event fails); PostgreSQL (escalated once and a second run does nothing, `EN_CONSULTA`, `ALTA` and escalated never selected, strict limit, order and batch size, flag, audit and outbox rolled back together, two concurrent runs escalate each of ten patients once, 25 rounds of a concurrent `PATCH` keep the audit order, the counter); Kafka (the event arrives with the level, both statuses and `escalado = true`); scheduler (full batches chained, a failed cycle does not stop the loop); BlockHound over the escalation; ArchUnit. Integration tests share one database, so each escalation test back-dates its patients to its own epoch, earlier than every previous one, and uses a fixed clock.
 - **Verified:** `./gradlew build` passes on JDK 21 (triage: 235 tests). Manual check with the compose PostgreSQL and Kafka, auth and triage running, an SLA of 1 minute for level 1 and an interval of 5 seconds: a critical patient registered through the API was escalated about 65 seconds later; the audit shows `REGISTERED` by `nurse` and `ESCALATED` by `system` with the same status before and after; the patient stays `REGISTRADO` with `status_changed_at` unchanged; both outbox rows were published; `kafka-console-consumer` shows `paciente_escalado` with `escalado: true`, the level and the patient id as key; a later `PATCH` to `EN_CONSULTA` works and `escalado` stays true.
 - **Not verified yet:** several replicas escalating at the same time on a real cluster (covered by the concurrent test only), and the alert reaction to the event (phase 7).
+
+### Phase 5, pull request 1: RAG (done)
+
+- **What:**
+  - **Corpus:** PROTO-001 to PROTO-003 as Markdown, word for word as in the specification, one section per chunk.
+  - **Ingestion:** idempotent (content hash and model). Validated at startup, embedded in the background with back-off (A37).
+  - **Persistence:** `protocol_chunks` in pgvector with an untyped vector, accessed with plain R2DBC (ADR 0002).
+  - **Use case:** question policy (1000 characters), retrieval gate, numbered excerpts, citation validator, sources from metadata (ADR 0007).
+  - **Providers:** `mock` (bag of words, extractive answer) and Gemini through the Spring AI starters (ADR 0008).
+  - **Resilience:** `ResilientLlmAdapter` with timeouts, the circuit breaker `llm`, and a 503 with `Retry-After` (ADR 0004).
+  - **Endpoint:** `POST /asistente/consulta` (`DOCTOR`), MapStruct mapper, shared error format, strict JSON.
+  - **Metrics:** `assistant.answers` and `assistant.llm.latency`.
+- **Decisions:** ADRs 0002, 0004, 0007 and 0008; assumptions A36 (thresholds `mock` 0.70, Gemini 0.33) and A37 (corpus at startup).
+- **Found while building:**
+  - **Spring AI:** the embedding connection auto-configuration of Spring AI ignores `spring.ai.model.embedding.text=none` and asks for credentials, so it is excluded unless the `gemini` profile is active.
+  - **Jackson:** it turns a number into text by default, so the coercion of numbers and booleans to text is disabled.
+  - **Ingestion:** embedding two sections at once dropped the second error when the provider failed, so sections are embedded one at a time.
+  - **BlockHound:** installing it in the middle of the test run broke the threads of the `parallel` scheduler and made timeouts hang. It is now installed when the test JVM starts (a JUnit `LauncherSessionListener`), so every assistant test runs under it.
+  - **The ignore rule:** `out/` also matched every source package named `out`, so the output ports and adapters of the auth service had never been committed and a fresh clone did not compile. It was fixed in its own pull request before this one (#28: the rule is now `/out/` and `/*/out/`).
+- **Verified:**
+  - **Build:** `./gradlew :triaxis-assistant-service:test` passes (92 tests).
+  - **`mock` against compose:** the corpus is stored (7 sections), and a second start embeds nothing.
+  - **`gemini` with an invalid key:** the service starts and the embedding is retried with back-off.
+  - **`gemini` with a real key, through the endpoint:**
+    - the five covered questions are answered from the right protocol and section, and diabetes gets the notice without a model call;
+    - three hard questions get the notice from the model: a drug the protocol does not name, a prompt injection asking for a dose, and the dose of a contraindicated drug;
+    - latency is about 1 second per answer, after turning off thinking (the first answer took 16.5 seconds with it).
+- **Not verified yet:** the urgency view (pull request 2), and the assistant in containers (phase 8).
 
 ---
 

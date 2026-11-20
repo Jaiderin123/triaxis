@@ -51,8 +51,8 @@ The name must be checked on GitHub and Google before publishing, to avoid clashi
 | Area | Choice | Notes |
 |---|---|---|
 | Framework | Spring AI **1.1.8** (latest 1.1 release, confirmed) | Spring AI 1.1 supports Boot 3.4 and 3.5. Spring AI 2.x requires Boot 4 |
-| LLM and embeddings | Google Gemini (chat and embeddings) | API key from an environment variable |
-| Local / tests | `mock` profile (deterministic fake LLM and embeddings) | Lets anyone run the system without an API key |
+| LLM and embeddings | Google Gemini through `spring-ai-starter-model-google-genai` and `spring-ai-starter-model-google-genai-embedding` (versions from the Spring AI BOM; they bring the `google-genai` 1.37.0 SDK): chat `gemini-2.5-flash`, embeddings `gemini-embedding-001` (768 dimensions), both checked against the API on 2026-11-19 | `gemini` profile; key from `GEMINI_API_KEY` only (ADR 0008) |
+| Local / tests | `mock` provider, the default (deterministic bag-of-words embeddings and extractive answers) | Lets anyone run the system without an API key; tests never call a real provider |
 | Retrieval | Cosine distance in pgvector with a similarity threshold | Below the threshold: fixed "no protocol available" answer, **no LLM call** |
 | Reactive isolation | `EmbeddingModel` and blocking SDK calls run on `boundedElastic` | |
 
@@ -73,7 +73,7 @@ The name must be checked on GitHub and Google before publishing, to avoid clashi
 | Area | Choice |
 |---|---|
 | Unit and integration | JUnit 5, Reactor Test (`StepVerifier`) |
-| Infrastructure | Testcontainers (PostgreSQL, Kafka) |
+| Infrastructure | Testcontainers (PostgreSQL `postgres:16-alpine` in triage and `pgvector/pgvector:pg16` in the assistant, Kafka, the `r2dbc` module for the R2DBC service connection) |
 | LLM | Mocked (never real calls in tests) |
 | Coverage | JaCoCo |
 | Mapping | MapStruct **1.6.3** (latest stable; 1.7 is still beta) | Generated mappers at the boundaries: DTO to command, entity to domain, domain to response |
@@ -102,7 +102,7 @@ Pin explicitly only:
 4. ArchUnit, BlockHound and MapStruct (checked: none is managed by the Spring Boot 3.5.16 BOM).
 5. Docker image tags.
 
-BlockHound on JDK 13+ may need the JVM flag `-XX:+AllowRedefinitionToAddDeleteMethods` in the test task (not verified yet).
+BlockHound on JDK 13+ needs the JVM flag `-XX:+AllowRedefinitionToAddDeleteMethods` in the test task (set in the root build; it prints a harmless deprecation warning).
 
 ## 9. Language conventions
 
@@ -126,4 +126,4 @@ BlockHound on JDK 13+ may need the JVM flag `-XX:+AllowRedefinitionToAddDeleteMe
 - [x] Confirm exact versions (done as they were adopted; recheck image tags before the deployment).
 - [ ] Choose Azure Container Apps or AKS, and how Kafka, PostgreSQL and Redis run there.
 - [ ] Choose the alert channel and format for escalations.
-- [ ] Calibrate the similarity threshold with the Gemini embedding model (deferred until a key is available, ASSUMPTIONS A36).
+- [x] Calibrate the similarity threshold with the Gemini embedding model (0.33, ASSUMPTIONS A36).
