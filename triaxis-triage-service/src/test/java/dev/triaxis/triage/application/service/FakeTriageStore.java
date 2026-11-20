@@ -16,6 +16,7 @@ import dev.triaxis.triage.application.port.out.IdGenerator;
 import dev.triaxis.triage.application.port.out.PatientRepository;
 import dev.triaxis.triage.application.port.out.TriageMetrics;
 import dev.triaxis.triage.application.port.out.UnitOfWork;
+import dev.triaxis.triage.domain.model.AlertOutcome;
 import dev.triaxis.triage.domain.model.AuditEntry;
 import dev.triaxis.triage.domain.model.Patient;
 import dev.triaxis.triage.domain.model.PatientEvent;
@@ -36,6 +37,7 @@ class FakeTriageStore implements PatientRepository, AuditRepository, EventPublis
 	final List<PatientEvent> events = new ArrayList<>();
 	final List<TriageLevel> classified = new ArrayList<>();
 	final List<TriageLevel> escalatedLevels = new ArrayList<>();
+	final List<AlertOutcome> alertOutcomes = new ArrayList<>();
 	final AtomicInteger committedUnits = new AtomicInteger();
 
 	Instant now = Instant.parse("2026-11-18T15:30:00Z");
@@ -137,6 +139,11 @@ class FakeTriageStore implements PatientRepository, AuditRepository, EventPublis
 	@Override
 	public void patientEscalated(TriageLevel level) {
 		escalatedLevels.add(level);
+	}
+
+	@Override
+	public void alertHandled(AlertOutcome outcome) {
+		alertOutcomes.add(outcome);
 	}
 
 	// UnitOfWork
