@@ -454,7 +454,7 @@ One entry per finished piece of work: what was done, decisions taken, how it was
   2. **UTC:** database sessions run in UTC through a connection customizer, and every test JVM runs in `America/Bogota`.
   3. **A1:** the JWKS download has timeouts and a refresh limit for unknown key ids.
   4. **A3:** R2DBC pool and session limits; timeouts per escalation batch, per relay cycle and on the similarity search; a database failure of the assistant is a 503.
-  5. **A4:** the urgency view uses its own marker key (`urgency:initialized`), and the startup check retries and restarts the listener when Redis does not answer.
+  5. **A4:** the urgency view uses its own marker key (`urgency:initialized`), and when Redis does not answer at partition assignment the consumer waits there, consuming nothing, until it does.
   6. **A5:** negative counts never break the view, and the assistant runs as a single replica (A39).
   7. **Security:** deny by default with a route rule test in every service; `exp` is required; tests for `alg: none` and HS256 with the public key.
   8. **Small items:** `toString` without secrets, the retries of Spring AI off (`max-attempts: 1`), the JUnit timeout in the assistant, and key files ignored.
@@ -464,6 +464,12 @@ One entry per finished piece of work: what was done, decisions taken, how it was
 - **Verified:**
   - `./gradlew build` passes for every module (453 tests) and `scripts/check-docs.sh` passes.
   - Each fix has a test that fails without it: the log capture, the session zone, the slow and unreachable JWKS, the stuck batch, the lost view, the negative count, a route without a rule and a token without `exp`.
+- **Re-review of the branch:** the `code-reviewer` agent, run on the diff, found 3 high findings introduced by these fixes, all fixed in the same branch:
+  - a JWKS refresh dropped the known keys before the download succeeded (now the last good key set is kept and downloads are shared);
+  - the relay cycle timeout was shorter than a slow but working cycle (now a budget stops the cycle between events, and the timeout is only a safety net, validated);
+  - restarting the listener left retries in flight (now the consumer waits in the assignment instead).
+  
+  The new settings are validated at startup. Medium and low findings of the re-review are in the improvements below.
 - **Engineering rules:** the rules that would have prevented these findings are in `CLAUDE.md` and in the definition of done of phases 6 to 9 above.
 
 ---
@@ -482,6 +488,11 @@ From the review of 2026-11-19 (report in `docs/private/reviews/`, not versioned)
 - Deterministic race tests: force both interleavings of a concurrent `PATCH` and the escalation (held transactions), and replace the remaining `Thread.sleep` polling with controllable schedulers.
 - Tests for auth: the use case `IssueTokenService` with fakes, the address limit on a real endpoint, the type of the decoder errors; BlockHound explicitly over the outbox relay.
 - A dependency scanner (OWASP Dependency-Check, Dependabot or Trivy); it is a new dependency and needs approval.
+- From the re-review of the fixes:
+  - transient database errors (`statement_timeout`, `lock_timeout`, pool exhausted) answer 500 in triage instead of 503;
+  - `assistant.rag.search-timeout` (3 s) is shorter than `statement_timeout` (10 s), so a cancelled search keeps its connection busy until the server stops it;
+  - no test holds a relay cycle to prove its rollback;
+  - the Gemini adapter is tested with a plain `ObjectMapper` instead of the one of Spring Boot.
 - Smaller items: a cooperative `stop()` of the background loops (no duplicate sends on shutdown); `concatMap(..., 0)` after `onBackpressureDrop`; `send-timeout` greater than `max.block.ms` plus `delivery.timeout.ms`; instants truncated to microseconds in the clock; `TriageProperties` validated; BCrypt explicitly on `boundedElastic`; a bounded rate limiter map; RSA keys of at least 2048 bits checked at startup; unused dependencies (`spring-boot-starter-validation` in triage and the assistant, `spring-boot-starter-aop` in the assistant, `triaxis-common` and the resource server starter in auth); leftovers of the project generator in `triaxis-triage-service/.gitignore` and `.gitattributes`; a JaCoCo threshold and the foojay toolchain resolver; a metric of failed logins; the Lua script of the urgency view uses keys of different slots (not compatible with Redis Cluster); records of the event contract with primitives default to 0 or false when a field is missing.
 
 - Read endpoint for the clinical audit (`GET /triage/pacientes/{id}/auditoria`); the audit is written and protected, but only readable through the database.
