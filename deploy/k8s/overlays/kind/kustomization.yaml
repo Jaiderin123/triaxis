@@ -1,0 +1,15 @@
+# Local validation on kind: images built locally (tag local, loaded with `kind load`), the mock LLM, no TLS,
+# and Traefik on a NodePort mapped to http://localhost:8088 (deploy/kind/cluster.yaml).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+patches:
+  - target: {kind: Service, name: traefik}
+    patch: |-
+      - op: replace
+        path: /spec/type
+        value: NodePort
+      - op: add
+        path: /spec/ports/0/nodePort
+        value: 30080
