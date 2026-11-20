@@ -3,6 +3,7 @@ package dev.triaxis.triage.infrastructure.config;
 import java.time.Instant;
 
 import dev.triaxis.triage.application.port.in.ChangePatientStatusUseCase;
+import dev.triaxis.triage.application.port.in.EscalateOverduePatientsUseCase;
 import dev.triaxis.triage.application.port.in.GetPatientUseCase;
 import dev.triaxis.triage.application.port.in.RegisterPatientUseCase;
 import dev.triaxis.triage.application.port.out.AuditRepository;
@@ -13,6 +14,7 @@ import dev.triaxis.triage.application.port.out.PatientRepository;
 import dev.triaxis.triage.application.port.out.TriageMetrics;
 import dev.triaxis.triage.application.port.out.UnitOfWork;
 import dev.triaxis.triage.application.service.ChangePatientStatusService;
+import dev.triaxis.triage.application.service.EscalateOverduePatientsService;
 import dev.triaxis.triage.application.service.GetPatientService;
 import dev.triaxis.triage.application.service.RegisterPatientService;
 import dev.triaxis.triage.domain.service.ComplaintPolicy;
@@ -25,7 +27,7 @@ import org.springframework.context.annotation.Configuration;
 
 /** Wires the framework-free domain and application classes. */
 @Configuration
-@EnableConfigurationProperties(TriageProperties.class)
+@EnableConfigurationProperties({TriageProperties.class, EscalationProperties.class})
 class TriageConfiguration {
 
 	@Bean
@@ -60,6 +62,14 @@ class TriageConfiguration {
 			EventPublisher events, IdGenerator ids, ClockPort clock, UnitOfWork unitOfWork,
 			StatusTransitionPolicy policy) {
 		return new ChangePatientStatusService(patients, audit, events, ids, clock, unitOfWork, policy);
+	}
+
+	@Bean
+	EscalateOverduePatientsUseCase escalateOverduePatientsUseCase(PatientRepository patients, AuditRepository audit,
+			EventPublisher events, IdGenerator ids, ClockPort clock, UnitOfWork unitOfWork, TriageMetrics metrics,
+			EscalationProperties properties) {
+		return new EscalateOverduePatientsService(patients, audit, events, ids, clock, unitOfWork, metrics,
+				properties.batchSize());
 	}
 
 	@Bean

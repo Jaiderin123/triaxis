@@ -6,4 +6,6 @@ public interface TriageMetrics {
 
 	void patientClassified(TriageLevel level);
 
+	void patientEscalated(TriageLevel level);
+
 }
