@@ -6,6 +6,8 @@ import java.util.stream.Collectors;
 import dev.triaxis.assistant.application.port.out.LlmPort;
 import dev.triaxis.assistant.domain.model.ModelAnswer;
 import dev.triaxis.assistant.domain.model.NumberedExcerpt;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
@@ -37,10 +39,14 @@ public class GeminiLlmAdapter implements LlmPort {
 	private final ChatClient chat;
 	private final EmbeddingModel embeddings;
 	private final String embeddingModelName;
+	private final ObjectMapper json;
+	/** Only for the format instructions of the prompt, never to parse (see {@link #read}). */
 	private final BeanOutputConverter<GeminiReply> converter = new BeanOutputConverter<>(GeminiReply.class);
 
-	public GeminiLlmAdapter(ChatModel chatModel, EmbeddingModel embeddings, String embeddingModelName) {
+	public GeminiLlmAdapter(ChatModel chatModel, EmbeddingModel embeddings, String embeddingModelName,
+			ObjectMapper json) {
 		this.chat = ChatClient.builder(chatModel).build();
+		this.json = json.copy().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 		this.embeddings = embeddings;
 		this.embeddingModelName = embeddingModelName;
 	}
@@ -71,20 +77,37 @@ public class GeminiLlmAdapter implements LlmPort {
 		return "Extractos:\n" + numbered + "\n\nPregunta: " + question;
 	}
 
+	/**
+	 * Reads the reply with our own JSON mapper. Spring AI's converter is used only to describe the format in the
+	 * prompt: when it cannot parse, it logs the whole model text at ERROR, and that text is never logged (ADR 0007).
+	 */
 	private ModelAnswer read(String content) {
 		try {
-			GeminiReply reply = converter.convert(content == null ? "" : content);
+			GeminiReply reply = json.readValue(withoutCodeFence(content), GeminiReply.class);
 			if (reply == null) {
 				return ModelAnswer.unusable();
 			}
 			return reply.noProtocol() ? ModelAnswer.noProtocolFound()
 					: new ModelAnswer(reply.answer(), reply.excerpts(), false);
 		}
-		catch (RuntimeException unreadable) {
-			// Never log the model text: it may contain clinical content that was not validated.
+		catch (Exception unreadable) {
+			// Only the type: the model text may contain clinical content that was not validated.
 			log.warn("The model answer is not the expected JSON ({})", unreadable.getClass().getSimpleName());
 			return ModelAnswer.unusable();
 		}
+	}
+
+	/** Models sometimes wrap JSON in a Markdown code fence even when JSON output is requested. */
+	static String withoutCodeFence(String content) {
+		String text = content == null ? "" : content.strip();
+		if (text.startsWith("```")) {
+			int firstLine = text.indexOf('\n');
+			int closing = text.lastIndexOf("```");
+			if (firstLine > 0 && closing > firstLine) {
+				return text.substring(firstLine + 1, closing).strip();
+			}
+		}
+		return text;
 	}
 
 }
