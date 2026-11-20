@@ -4,4 +4,5 @@ include 'triaxis-triage-service',
         'triaxis-assistant-service',
         'triaxis-auth-service',
         'triaxis-common',
-        'triaxis-security'
+        'triaxis-security',
+        'triaxis-web'

@@ -56,8 +56,24 @@ class SecurityFilterChainTest {
 	}
 
 	@Test
-	void protectedPathWithoutTokenIsUnauthorized() {
-		client.get().uri("/anyone").exchange().expectStatus().isEqualTo(HttpStatus.UNAUTHORIZED);
+	void protectedPathWithoutTokenIsUnauthorizedInTheStandardFormat() {
+		client.get().uri("/anyone").exchange()
+				.expectStatus().isEqualTo(HttpStatus.UNAUTHORIZED)
+				.expectHeader().valueEquals("WWW-Authenticate", "Bearer")
+				.expectHeader().contentTypeCompatibleWith("application/problem+json")
+				.expectBody()
+				.jsonPath("$.status").isEqualTo(401)
+				.jsonPath("$.instance").isEqualTo("/anyone")
+				.jsonPath("$.detail").isEqualTo("Authentication is required")
+				.jsonPath("$.timestamp").isNotEmpty();
+	}
+
+	@Test
+	void anInvalidTokenIsUnauthorizedWithAnInvalidTokenChallenge() {
+		client.get().uri("/anyone").header("Authorization", "Bearer not.a.token").exchange()
+				.expectStatus().isUnauthorized()
+				.expectHeader().valueEquals("WWW-Authenticate", "Bearer error=\"invalid_token\"")
+				.expectBody().jsonPath("$.status").isEqualTo(401);
 	}
 
 	@Test
@@ -75,7 +91,9 @@ class SecurityFilterChainTest {
 	@Test
 	void roleRuleRejectsOtherRole() {
 		client.mutateWith(mockJwt().authorities(new SimpleGrantedAuthority("ROLE_DOCTOR")))
-				.get().uri("/nurse-only").exchange().expectStatus().isForbidden();
+				.get().uri("/nurse-only").exchange().expectStatus().isForbidden()
+				.expectHeader().contentTypeCompatibleWith("application/problem+json")
+				.expectBody().jsonPath("$.status").isEqualTo(403).jsonPath("$.detail").isEqualTo("Access denied");
 	}
 
 }

@@ -46,6 +46,9 @@ class OutboxRelayTest {
 	OutboxRelay relay;
 
 	@Autowired
+	org.springframework.test.web.reactive.server.WebTestClient client;
+
+	@Autowired
 	KafkaTemplate<String, String> kafka;
 
 	@Autowired
@@ -249,18 +252,26 @@ class OutboxRelayTest {
 	}
 
 	@Test
-	void keepsTheCorrelationIdInTheKafkaHeader() {
+	void sendsTheTraceOfTheRequestInTheKafkaHeaders() {
 		drain();
-		Patient patient = PersistenceTestSupport.newPatient();
-		unitOfWork.execute(patients.save(patient)
-				.then(events.publish(PatientEvent.registered(UUID.randomUUID(), patient))))
-				.contextWrite(context -> context.put("correlationId", "req-abc-123")).block();
+		String traceId = "0af7651916cd43dd8448eb211c80319c";
+		String id = client.post().uri("/triage/pacientes")
+				.header("Authorization", "Bearer " + dev.triaxis.triage.TestSecurityConfiguration.token("nurse-ana", "NURSE"))
+				.header("traceparent", "00-" + traceId + "-b7ad6b7169203331-01")
+				.contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+				.bodyValue(Map.ofEntries(Map.entry("nombreCompleto", "Ana Gomez"), Map.entry("edad", 54),
+						Map.entry("frecuenciaCardiaca", 72), Map.entry("presionSistolica", 120),
+						Map.entry("presionDiastolica", 80), Map.entry("spo2", 99), Map.entry("temperatura", 36.5),
+						Map.entry("dolor", 2), Map.entry("gcs", 15), Map.entry("quejaPrincipal", "Consulta")))
+				.exchange().expectStatus().isCreated().expectBody(Map.class).returnResult().getResponseBody()
+				.get("id").toString();
 
 		relay.relayOnce().block();
 
-		List<ConsumerRecord<String, String>> records = readTopic(Set.of(patient.id().toString()), 1);
+		List<ConsumerRecord<String, String>> records = readTopic(Set.of(id), 1);
 		assertThat(records).hasSize(1);
-		assertThat(header(records.get(0), "correlationId")).isEqualTo("req-abc-123");
+		assertThat(header(records.get(0), "correlationId")).isEqualTo(traceId);
+		assertThat(header(records.get(0), "traceparent")).startsWith("00-" + traceId + "-");
 	}
 
 	@Test

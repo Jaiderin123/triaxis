@@ -63,5 +63,13 @@ services:
       timeout: 3s
       retries: 20
 
+  # Traces (OpenTelemetry). Services export to it when TRACING_EXPORT_ENABLED=true; the UI is on port 16686.
+  jaeger:
+    image: jaegertracing/jaeger:2.4.0
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+
 volumes:
   postgres-data:

@@ -76,10 +76,13 @@ CREATE TABLE IF NOT EXISTS outbox_events (
   event_id       UUID NOT NULL UNIQUE,
   message_key    VARCHAR(64) NOT NULL,
   event_type     VARCHAR(32) NOT NULL,
-  correlation_id VARCHAR(64),
+  correlation_id VARCHAR(64),   -- trace id of the request
   payload        JSONB NOT NULL,
   created_at     TIMESTAMPTZ NOT NULL,
   published_at   TIMESTAMPTZ
 );
 
 CREATE INDEX IF NOT EXISTS idx_outbox_pending ON outbox_events (id) WHERE published_at IS NULL;
+
+-- The W3C trace context of the request that caused the event; the relay sends it as a Kafka header.
+ALTER TABLE outbox_events ADD COLUMN IF NOT EXISTS traceparent VARCHAR(64);

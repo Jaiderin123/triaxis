@@ -10,7 +10,7 @@ Versions are confirmed against Maven Central and Docker Hub as they are adopted;
 | Project name | Triaxis |
 | Repository | `triaxis` |
 | Base package | `dev.triaxis.<module>` (for example `dev.triaxis.triage`); Gradle group `dev.triaxis` |
-| Gradle modules | `triaxis-triage-service`, `triaxis-assistant-service`, `triaxis-auth-service`, `triaxis-common`, `triaxis-security` |
+| Gradle modules | `triaxis-triage-service`, `triaxis-assistant-service`, `triaxis-auth-service`, `triaxis-common`, `triaxis-security`, `triaxis-web` |
 | Docker images | `triaxis/triage-service`, `triaxis/assistant-service`, `triaxis/auth-service` |
 
 The name must be checked on GitHub and Google before publishing, to avoid clashing with an existing health product.
@@ -33,6 +33,7 @@ The name must be checked on GitHub and Google before publishing, to avoid clashi
 | `triaxis-auth-service` | Issues JWTs (RS256) and exposes the public key (JWKS) |
 | `triaxis-common` | Event contracts shared by the services |
 | `triaxis-security` | Shared JWT validation configuration (resource server) |
+| `triaxis-web` | Shared WebFlux plumbing: standard error responses, access log, protected metrics endpoint, tracing dependencies |
 
 ## 3. Data and messaging
 
@@ -61,9 +62,9 @@ The name must be checked on GitHub and Google before publishing, to avoid clashi
 |---|---|
 | Resilience | Resilience4j **2.4.0** (`resilience4j-spring-boot3`, `resilience4j-reactor`): circuit breaker and timeout on LLM calls, explicit fallback (HTTP 503) |
 | Health | Spring Boot Actuator: liveness and readiness probes |
-| Metrics | Micrometer: classification counts per level, escalations, LLM latency |
-| Logging | Structured JSON logs with correlation id |
-| Tracing | OpenTelemetry (bonus, if time allows) |
+| Metrics | Micrometer with a Prometheus endpoint protected by HTTP Basic: classification counts per level, outbox, escalations, LLM latency |
+| Logging | Spring Boot structured logging, ECS JSON on the console, with the trace id; plain text in the `local` profile |
+| Tracing | OpenTelemetry through Micrometer Tracing (`micrometer-tracing-bridge-otel` and the OTLP exporter, versions from the Spring Boot BOM); Jaeger locally |
 | Authentication | JWT, RS256, issued by `auth-service`; validated by the other services through the public key (JWKS) |
 | Secrets | Environment variables only. Nothing hardcoded or committed |
 

@@ -167,10 +167,37 @@ A1 to A4 come from `ARCHITECTURE.md` section 6.2. A5 onward were added while pre
 - **Why:** consistent contract, and the time in the current state is exact enough to test.
 - **Impact if wrong:** a client expecting 204 on `PATCH` ignores the body; renaming is a DTO change.
 
-## A26. Correlation id of a request
+## A26. Correlation of a request
 
-- **Ambiguity:** the specification asks for structured logs with a correlation id but not for where the id comes from.
-- **Decision:** the id is taken from the `X-Correlation-Id` header when it is safe (letters, digits, dot, dash and underscore, up to 64 characters); otherwise a new one is generated. It is echoed in the response, stored with each outbox event and sent as the `correlationId` header of the Kafka message.
-- **Why:** callers can trace a request across services, and an unsafe value cannot inject text into logs or headers.
-- **Impact if wrong:** an id that does not match the pattern is replaced, which only affects tracing.
+- **Ambiguity:** the specification asks for structured logs with correlation but not for where the id comes from.
+- **Decision:** the correlation id is the OpenTelemetry trace id. A request that carries a valid W3C `traceparent` header continues that trace; otherwise a new trace starts. The trace id appears in every log line, in the `traceId` of error bodies, in the outbox row and in the Kafka headers `correlationId` and `traceparent`. This replaces the earlier `X-Correlation-Id` header, which was removed. See ADR 0019.
+- **Why:** one mechanism that also works across services and Kafka, and that covers the optional tracing requirement.
+- **Impact if wrong:** callers that sent `X-Correlation-Id` get a new trace instead; tracing is independent of business behavior.
 
+## A27. Standard error format
+
+- **Ambiguity:** the specification asks for a clear message for invalid fields and for 409, 503 and similar answers, but not for a common shape.
+- **Decision:** every error of every service is RFC 7807 with `type`, `title`, `status`, `detail`, `instance`, `traceId` and `timestamp`; validation errors add `errores` with `campo` and `mensaje`. 401 and 403 use the same shape. Messages are in English, field names are the external ones. See ADR 0018.
+- **Why:** clients handle one format, and a trace id makes any error traceable.
+- **Impact if wrong:** a different shape is a change in one class of the shared module.
+
+## A28. Hardening values
+
+- **Ambiguity:** the specification asks for authentication and input validation only.
+- **Decision:** tokens carry and require `aud` = `triaxis`; request bodies are limited to 64 KB; the token endpoint allows 10 attempts per minute per username and per address; sensitive data is never logged. See ADR 0020.
+- **Why:** reasonable defaults that protect the API without making it hard to use.
+- **Impact if wrong:** the values are configuration (`auth.jwt.audience`, `spring.codec.max-in-memory-size`, `auth.rate-limit.*`).
+
+## A29. Protected metrics endpoint
+
+- **Ambiguity:** the specification asks for Micrometer metrics, not for how they are exposed or protected.
+- **Decision:** `/actuator/prometheus` is exposed with HTTP Basic using `METRICS_USER` and `METRICS_PASSWORD` from the environment; without a password it is denied. The ingress does not route `/actuator`. Only health, info and Prometheus are exposed.
+- **Why:** metrics reveal internals, so they are not left open, and a scraper can use Basic credentials from a Secret.
+- **Impact if wrong:** a management port or a network-level restriction can replace it without changing the metrics.
+
+## A30. Readiness of the triage service
+
+- **Ambiguity:** which dependencies make the service not ready.
+- **Decision:** readiness includes the database and excludes Kafka, because the outbox keeps events when Kafka is down and the service can still register patients.
+- **Why:** a broker outage must not take every pod out of service.
+- **Impact if wrong:** adding Kafka to the readiness group is a one-line property change.

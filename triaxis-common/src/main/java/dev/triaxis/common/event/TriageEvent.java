@@ -36,8 +36,11 @@ public record TriageEvent(
 	/** Kafka topic of the contract. */
 	public static final String TOPIC = "triaje.eventos";
 
-	/** Kafka header with the correlation id of the request that caused the event. */
+	/** Kafka header with the trace id of the request that caused the event (also the correlation id). */
 	public static final String CORRELATION_ID_HEADER = "correlationId";
+
+	/** Kafka header with the W3C trace context, so a consumer can continue the trace of the request. */
+	public static final String TRACEPARENT_HEADER = "traceparent";
 
 	/** Kafka header with the event name (same value as {@code tipo}). */
 	public static final String EVENT_TYPE_HEADER = "eventType";

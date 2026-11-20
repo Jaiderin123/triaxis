@@ -13,14 +13,19 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * the {@code JWT_PRIVATE_KEY} environment variable and users come from configuration.
  */
 @ConfigurationProperties("auth")
-public record AuthProperties(Jwt jwt, @DefaultValue List<UserEntry> users) {
+public record AuthProperties(Jwt jwt, @DefaultValue List<UserEntry> users, @DefaultValue RateLimit rateLimit) {
 
 	public record Jwt(
 			@DefaultValue("triaxis-auth") String issuer,
+			@DefaultValue("triaxis") String audience,
 			@DefaultValue("PT15M") Duration ttl,
 			/** PKCS#8 PEM private key; empty when it must be generated (local profile only). */
 			@DefaultValue("") String privateKey,
 			@DefaultValue("false") boolean generateKeyIfMissing) {
+	}
+
+	/** Attempts allowed on the token endpoint per username and per address in each window. */
+	public record RateLimit(@DefaultValue("10") int maxAttempts, @DefaultValue("PT1M") Duration window) {
 	}
 
 	public record UserEntry(String username, String passwordHash, Set<Role> roles) {

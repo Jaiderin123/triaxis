@@ -17,7 +17,7 @@ Every state change of a patient must be published to Kafka (`paciente_registrado
   - a failed send stops the cycle and the event stays pending, so it is retried in the next one;
   - the producer uses `acks=all` and idempotence, with the patient id as the message key.
 - Delivery is **at least once**: if the process dies after the send but before the commit, the event is sent again. Consumers are idempotent and use the event id.
-- The correlation id of the request is stored with the event and sent as the `correlationId` header, with the event name in `eventType`.
+- The trace of the request is stored with the event (`correlation_id` holds the trace id and `traceparent` the W3C trace context) and sent as the Kafka headers `correlationId` and `traceparent`, with the event name in `eventType`, so a consumer can continue the trace (ADR 0019).
 - The metric `triage.outbox.pending` shows how many events wait, and `triage.outbox.published` and `triage.outbox.failures` count the results.
 
 ## Alternatives considered
