@@ -102,7 +102,7 @@ A1 to A4 come from `ARCHITECTURE.md` section 6.2. A5 onward were added while pre
 - **Ambiguity:** channel, format and technology are deliberately unspecified.
 - **Decision:** a Kafka-driven `AlertNotifier` inside `triage-service`: webhook (Slack or Teams-compatible JSON) as the real adapter, structured log as the default. Retries with backoff; failures are counted and never affect escalation.
 - **Why:** decoupled from the escalation transaction, no fourth service, testable with a fake webhook. Alternatives (email, SSE, a separate `notification-service`) are in `ARCHITECTURE.md` 6.8.
-- **Impact if wrong:** replacing the adapter does not touch the domain. The full reasoning goes to ADR 0011 (not written yet).
+- **Impact if wrong:** replacing the adapter does not touch the domain. The full reasoning is in ADR 0011; the content is in A44 and the delivery in A45.
 
 ## A16. LLM profile in the deployed environment
 
@@ -294,4 +294,18 @@ A1 to A4 come from `ARCHITECTURE.md` section 6.2. A5 onward were added while pre
 - **Decision:** a patient counts in the UTC hour of its registration. The wait is `consultation_started_at - registered_at` in minutes; patients still waiting and patients discharged directly (A7) are counted in `totalPacientes` and `porNivel` but not in the waits. When no patient of an hour entered consultation, both waits are `null`. The p95 is `percentile_cont(0.95)` (interpolated). Waits are rounded to 2 decimals.
 - **Why:** grouping by registration keeps one hour per patient and matches the totals; `null` is not a zero wait; the interpolated percentile is stable with few patients.
 - **Impact if wrong:** grouping by the hour of consultation would move patients between hours; `percentile_disc` would return a real wait instead of an interpolated one.
+
+## A44. Content of the escalation alert
+
+- **Ambiguity:** RF-06 does not say what the alert contains, and a webhook (for example to Slack) sends the data outside the system.
+- **Decision:** the alert carries the minimum: the patient id, the level, the SLA in minutes, the minutes waited from the registration to the escalation, the time of the escalation, and the path `/triage/pacientes/{id}` to read the rest with authentication. It carries no name, vital signs or complaint. The `text` is in Spanish, like the rest of the external contract.
+- **Why:** the team knows how urgent the case is and where to look, and no identifiable clinical data leaves the system through a third-party channel.
+- **Impact if wrong:** the team must open the patient to see the name; adding fields to the alert is a change in the notifier only.
+
+## A45. Delivery of the escalation alert
+
+- **Ambiguity:** Kafka delivers at least once, and a channel can be down; RF-06 says nothing about duplicates or failures.
+- **Decision:** every handled event is recorded in `alert_deliveries` (event id as the key) after it was sent or given up, and an event already recorded is not sent again (counted as `duplicate`). A failed send is retried up to 3 times with growing waits (1 s, 2 s, 4 s); then the alert is counted as `failed`, logged without patient data, and the next event goes on. The escalation itself is never affected.
+- **Why:** repeated alerts erode trust in the channel; one channel outage must not hold every later alert.
+- **Impact if wrong:** an alert that failed three times is not sent again (it stays in the logs, the metric and the table); a crash after the send and before the record can still repeat one alert.
 
