@@ -1,0 +1,18 @@
+# Settings that are not secret (ARCHITECTURE section 10). Secrets come from triaxis-secrets.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: triaxis-config
+data:
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  AUTH_JWKS_URI: http://auth:8083/.well-known/jwks.json
+  TRIAGE_DB_URL: r2dbc:postgresql://postgres:5432/triage
+  ASSISTANT_DB_URL: r2dbc:postgresql://postgres:5432/assistant
+  DB_USER: triaxis
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  METRICS_USER: metrics
+  TRACING_EXPORT_ENABLED: "false"
+  TRIAGE_ALERTS_CHANNEL: log
+  # The mock provider unless an overlay sets gemini (A16).
+  ASSISTANT_PROFILES: ""

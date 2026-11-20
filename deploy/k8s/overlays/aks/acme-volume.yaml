@@ -1,0 +1,10 @@
+# The certificate of Let's Encrypt survives restarts of Traefik and of the cluster (rate limits of Let's Encrypt).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: traefik-acme
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
