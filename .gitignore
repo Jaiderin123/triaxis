@@ -1,6 +1,8 @@
 # Build output
 build/
-out/
+# IntelliJ output folders only (root and modules); source packages named out are code
+/out/
+/*/out/
 target/
 .gradle/
 
