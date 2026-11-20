@@ -205,6 +205,37 @@ class OutboxRelayTest {
 		assertThat(relay.relayOnce().block()).isZero();
 	}
 
+	/**
+	 * Past its budget a cycle stops between two events and commits what it sent, so a slow Kafka makes the relay
+	 * slower but never makes it send the same events forever; the first event of a cycle always goes.
+	 */
+	@Test
+	void aCycleStopsAtItsBudgetBetweenEventsAndAlwaysProgresses() {
+		drain();
+		for (int i = 0; i < 3; i++) {
+			registerPatientWithEvent();
+		}
+		OutboxProperties.Relay base = properties.relay();
+		OutboxProperties tight = new OutboxProperties(new OutboxProperties.Relay(false, base.interval(), 50,
+				base.sendTimeout(), Duration.ofNanos(1), base.cycleTimeout()), properties.topic());
+		OutboxRelay budgeted = new OutboxRelay(database, transaction, kafka, tight, meters);
+
+		assertThat(budgeted.relayOnce().block()).isEqualTo(1);
+		assertThat(budgeted.relayOnce().block()).isEqualTo(1);
+		assertThat(budgeted.relayOnce().block()).isEqualTo(1);
+		assertThat(budgeted.relayOnce().block()).isZero();
+	}
+
+	@Test
+	void theRelaySettingsAreValidated() {
+		org.assertj.core.api.Assertions.assertThatThrownBy(() -> new OutboxProperties.Relay(true, Duration.ofSeconds(1),
+						50, Duration.ofSeconds(15), Duration.ofSeconds(50), Duration.ofSeconds(60)))
+				.isInstanceOf(IllegalArgumentException.class).hasMessageContaining("cycle-timeout");
+		org.assertj.core.api.Assertions.assertThatThrownBy(() -> new OutboxProperties.Relay(true, Duration.ZERO, 50,
+						Duration.ofSeconds(15), Duration.ofSeconds(30), Duration.ofSeconds(60)))
+				.isInstanceOf(IllegalArgumentException.class);
+	}
+
 	@Test
 	void eventsAreNotLostWhenKafkaIsUnavailable() {
 		drain();

@@ -25,7 +25,10 @@ These are cross-cutting choices with alternatives, so they are recorded together
 - **Bounded database waits.** Both services:
   - set the pool limits: `max-size` 10, `max-acquire-time` 5 s, `max-create-connection-time` 5 s, `max-validation-time` 2 s;
   - set session limits through a `ConnectionFactoryOptionsBuilderCustomizer`: `statement_timeout` 10 s and `lock_timeout` 5 s (`triaxis.database.*`).
-- **Bounded background cycles.** Each escalation batch has a timeout (`triage.escalation.batch-timeout`), and so does each relay cycle (`triage.outbox.relay.cycle-timeout`, rolled back and retried). One stuck cycle never stops the loop.
+- **Bounded background cycles.** One stuck cycle never stops the loop:
+  - each escalation batch has a timeout (`triage.escalation.batch-timeout`, 60 s for a batch of 100, about 300 statements), after which it is rolled back;
+  - a relay cycle has a budget (`cycle-budget`, 30 s): after it, the cycle stops between two events and commits what it sent, always at least one event, so a slow but working Kafka never makes the relay send the same events forever;
+  - a hard `cycle-timeout` (60 s) is only a safety net for a stuck cycle, which is rolled back. It is validated at startup to be longer than the budget plus one send.
 - **Bounded similarity search.** The search of the assistant has a timeout (`assistant.rag.search-timeout`), and a database failure is a 503.
 - **UTC sessions.** The same customizer sets the session time zone to UTC. A customizer is used instead of `spring.r2dbc.properties` because Spring Boot ignores those properties when the connection comes from connection details, which is the case in the Testcontainers tests. Every test JVM runs in `America/Bogota`, so code that depends on the JVM zone fails in the tests.
 - **A dedicated marker for the urgency view.** `urgency:initialized` is written only by the reset before a replay. When Redis does not answer at partition assignment, the check is retried and the listener restarted later. The assistant runs as a single replica (ASSUMPTIONS A39).
@@ -42,5 +45,5 @@ These are cross-cutting choices with alternatives, so they are recorded together
 - A new route fails its service tests until it gets a rule, which protects the report of phase 6 and the later endpoints.
 - A slow auth service, database or Redis now produces errors with a stack trace and metrics, instead of requests and loops that hang.
 - **Values to tune.** The limits are properties. A real statement slower than 10 s would now fail; none of the current queries is close to that.
-- **Duplicated events on a timeout.** A relay cycle cut by its timeout sends its events again (at-least-once delivery, ADR 0005).
+- **Duplicated events on a timeout.** Only a stuck relay cycle, cut by the hard timeout, sends its events again (at-least-once delivery, ADR 0005). A slow cycle stops at its budget and keeps what it sent.
 - **Accepted debt.** The improvements left from the same review are listed in `PLAN.md`: a dead letter for the outbox, selective retries of the listener, a bulkhead for the LLM, deterministic race tests and a dependency scanner.

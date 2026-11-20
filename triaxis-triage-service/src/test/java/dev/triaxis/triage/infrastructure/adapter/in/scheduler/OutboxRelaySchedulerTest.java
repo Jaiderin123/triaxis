@@ -39,7 +39,8 @@ class OutboxRelaySchedulerTest {
 	@Test
 	void deliversPendingEventsPeriodicallyUntilItIsStopped() throws Exception {
 		OutboxProperties fast = new OutboxProperties(
-				new OutboxProperties.Relay(true, Duration.ofMillis(100), 50, Duration.ofSeconds(15), Duration.ofSeconds(60)),
+				new OutboxProperties.Relay(true, Duration.ofMillis(100), 50, Duration.ofSeconds(15), Duration.ofSeconds(30),
+						Duration.ofSeconds(60)),
 				new OutboxProperties.Topic(3, (short) 1));
 		OutboxRelayScheduler scheduler = new OutboxRelayScheduler(relay, fast);
 		Patient patient = PersistenceTestSupport.newPatient();

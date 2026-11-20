@@ -81,6 +81,16 @@ class EscalationSchedulerTest {
 	}
 
 	@Test
+	void theEscalationSettingsAreValidated() {
+		org.assertj.core.api.Assertions.assertThatThrownBy(
+				() -> new EscalationProperties(true, Duration.ofSeconds(30), 0, Duration.ofSeconds(60)))
+				.isInstanceOf(IllegalArgumentException.class);
+		org.assertj.core.api.Assertions.assertThatThrownBy(
+				() -> new EscalationProperties(true, Duration.ofSeconds(30), 100, Duration.ZERO))
+				.isInstanceOf(IllegalArgumentException.class);
+	}
+
+	@Test
 	void aFailedCycleDoesNotStopTheLoop() throws Exception {
 		ScriptedEscalation escalation = new ScriptedEscalation(List.of(new IllegalStateException("database down"), 1));
 		EscalationScheduler scheduler = scheduler(escalation, Duration.ofMillis(50));
