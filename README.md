@@ -133,7 +133,7 @@ curl -s -X POST localhost:8088/auth/token -H 'Content-Type: application/json' \
 kind delete cluster --name triaxis
 ```
 
-**Azure (AKS):** [Terraform](deploy/azure/terraform) creates the resource group, an AKS cluster with the free tier and one `Standard_B2ms` node in `eastus2`, the static public IP with its DNS label, and an optional budget. Traefik gets a Let's Encrypt certificate for that host and redirects HTTP to HTTPS; the assistant uses Gemini with the key from the Secret.
+**Azure (AKS):** deployed at https://triaxis-demo.eastus2.cloudapp.azure.com (verified on 2026-11-20 with the sample flow over HTTPS and a question to Gemini; the credentials of the deployed users are handed over separately, the demo passwords are refused there). [Terraform](deploy/azure/terraform) creates the resource group, an AKS cluster with the free tier and one `Standard_D2as_v7` node (2 vCPU, 8 GiB) in `eastus2`, the static public IP with its DNS label, and an optional budget. Traefik gets a Let's Encrypt certificate for that host and redirects HTTP to HTTPS; the assistant uses Gemini with the key from the Secret.
 
 ```bash
 cp deploy/azure/terraform/terraform.tfvars.example deploy/azure/terraform/terraform.tfvars   # set subscription_id
