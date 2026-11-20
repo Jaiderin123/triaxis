@@ -5,6 +5,7 @@ import java.util.List;
 import dev.triaxis.triage.domain.exception.ConcurrentStatusChangeException;
 import dev.triaxis.triage.domain.exception.FieldViolation;
 import dev.triaxis.triage.domain.exception.InvalidPatientDataException;
+import dev.triaxis.triage.domain.exception.InvalidReportRangeException;
 import dev.triaxis.triage.domain.exception.InvalidStatusTransitionException;
 import dev.triaxis.triage.domain.exception.PatientNotFoundException;
 import dev.triaxis.triage.infrastructure.adapter.in.web.mapper.ExternalFieldNames;
@@ -35,6 +36,9 @@ class GlobalErrorHandler extends AbstractProblemExceptionHandler {
 	@Override
 	protected ProblemDetail mapDomain(Throwable error) {
 		if (error instanceof InvalidPatientDataException invalid) {
+			return Problems.validation(fields(invalid.violations(), true));
+		}
+		if (error instanceof InvalidReportRangeException invalid) {
 			return Problems.validation(fields(invalid.violations(), true));
 		}
 		if (error instanceof InvalidRequestException invalid) {

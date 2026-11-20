@@ -73,6 +73,17 @@ class NonBlockingFlowTest {
 	}
 
 	@Test
+	void theOperationReportDoesNotBlockTheEventLoop() {
+		register(client, nurse(), notUrgent()).expectStatus().isCreated();
+		java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneOffset.UTC);
+
+		client.get().uri("/triage/reportes/operacion?desde=" + today + "&hasta=" + today)
+				.header(org.springframework.http.HttpHeaders.AUTHORIZATION, ApiTestSupport.doctor())
+				.exchange().expectStatus().isOk()
+				.expectBody().jsonPath("$.horas.length()").value(count -> assertThat((Integer) count).isPositive());
+	}
+
+	@Test
 	void theEscalationDoesNotBlockANonBlockingThread() {
 		Instant epoch = PersistenceTestSupport.nextEpoch();
 		patients.save(PersistenceTestSupport.registeredAt(epoch, PatientStatus.REGISTERED)).block();
