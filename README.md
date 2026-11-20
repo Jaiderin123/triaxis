@@ -81,6 +81,8 @@ curl -s -X POST localhost:8082/asistente/consulta -H "Authorization: Bearer $TOK
   -H 'Content-Type: application/json' -d '{"pregunta":"¿Cuándo se administra el primer antibiótico en sepsis?"}'
 ```
 
+Security is deny-by-default: every route has an explicit role rule, so a path without one answers 401 without a token and 403 with one. Tokens are RS256 JWTs from the auth service and must carry `iss`, `aud` and `exp`.
+
 More endpoints (operation report) are added in later phases. Assumptions and ambiguities of the specification are in [docs/ASSUMPTIONS.md](docs/ASSUMPTIONS.md).
 
 ## Decisions

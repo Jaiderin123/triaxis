@@ -11,7 +11,7 @@ Triaxis is a reactive digital triage system with a clinical assistant. Nurses re
 | Phased checklist (what to do next) | `docs/PLAN.md` |
 | Assumptions and ambiguities | `docs/ASSUMPTIONS.md` |
 | Git and commit conventions | `docs/GIT_WORKFLOW.md` |
-| Decision records | `docs/adr/` (README, template and ADRs 0001 to 0009, 0012, 0013, 0014, 0015, 0016, 0017, 0018, 0019, 0020 and 0021 exist; the status of the rest is in `ARCHITECTURE.md` section 14) |
+| Decision records | `docs/adr/` (README, template and ADRs 0001 to 0009 and 0012 to 0022 exist; the status of the rest is in `ARCHITECTURE.md` section 14) |
 | Original requirements (RF-xx, RN-xx), Spanish | `docs/private/ASSIGNMENT.md` (local only, git-ignored) |
 
 ## Modules
@@ -25,7 +25,7 @@ Triaxis is a reactive digital triage system with a clinical assistant. Nurses re
 | `triaxis-security` | n/a | Library: shared resource-server (JWT) configuration |
 | `triaxis-web` | n/a | Library: standard error responses, access log, protected metrics, tracing (no business logic) |
 
-All five modules exist on Spring Boot 3.5.16 and `./gradlew build` passes. Done: auth service and shared security (phase 1), the triage core with the audit (phase 2), the events through a transactional outbox with an ordered relay to Kafka (phase 3), the platform foundation (standard errors, OpenTelemetry, JSON logs, protected metrics, hardening) and the SLA escalation with its scheduler (phase 4, in review). Done: the assistant (phase 5): RAG with validated citations and the degraded mode (verified also with a real Gemini key), and the urgency view built from Kafka in Redis. Phases 4 and 5 are released to `main`. Next: the operation report (phase 6). The status table and the resume notes are in `docs/PLAN.md`.
+All six modules exist on Spring Boot 3.5.16 and `./gradlew build` passes. Done and released to `main`: the auth service and shared security (phase 1), the triage core with the audit (phase 2), the events through a transactional outbox with an ordered relay to Kafka (phase 3), the platform foundation (standard errors, OpenTelemetry, JSON logs, protected metrics, hardening), the SLA escalation (phase 4), the assistant (phase 5: RAG with validated citations, the degraded mode, the urgency view from Kafka in Redis), and the fixes of the review of 2026-11-19 (ADR 0022). Next: the operation report (phase 6). The status table and the resume notes are in `docs/PLAN.md`.
 
 ## Package layout (hexagonal, per service)
 
@@ -78,6 +78,18 @@ Security and hygiene
 - External contract in Spanish exactly as specified (paths, JSON fields, event names, state and level values). Code, comments, commits and docs in English. No `@author` tags.
 - Specification ambiguities that change behavior get an ADR (for example ADR 0013).
 
+## Engineering rules from the 2026-11-19 review
+
+- Every remote call has an explicit timeout: HTTP clients (including the JWKS), the R2DBC pool (acquire, create) and the session (`statement_timeout`, `lock_timeout`), Kafka, Redis and the LLM. Background loops have a per-cycle timeout, so one stuck cycle never stops the loop.
+- Database sessions and SQL time handling are UTC (set by the connection customizer, never by `spring.r2dbc.properties`, which connection details ignore). Tests run in a non-UTC JVM.
+- Never log model output, patient data, questions or secrets. Records holding secrets override `toString`. Do not let a library log what we refuse to log (parse model output with our own `ObjectMapper`).
+- Security is deny-by-default: every new route needs an explicit rule in its `AuthorizationRulesCustomizer` and a test per role; `RouteSecurityTest` must keep passing. Tokens without `exp` are refused.
+- Docs describe only what exists: a task is ticked only after it is verified; a decision changed in the code updates or supersedes its ADR in the same pull request.
+- Concurrency tests force the interleavings they claim to test; no `Thread.sleep` for synchronization.
+- Read models and markers use dedicated keys; state the replica assumptions of any background process (the assistant runs as one replica, A39).
+- New configuration properties are validated and documented in `ARCHITECTURE.md` section 10.
+- Before a pull request, check that a fresh clone of the branch compiles (an ignore rule once hid source packages).
+
 ## Working method
 
 1. Read `docs/PLAN.md` and take the next unchecked task.
@@ -112,7 +124,7 @@ export JAVA_HOME=$HOME/.jdks/temurin-21.0.10
 ./gradlew test                                    # tests only (unverified)
 ./gradlew :triaxis-triage-service:test            # one module (verified: passes, needs Docker running)
 ./gradlew :triaxis-triage-service:bootRun --args='--spring.profiles.active=local'   # triage on 8081, needs the compose PostgreSQL (verified)
-./gradlew :triaxis-assistant-service:bootRun --args='--spring.profiles.active=local'          # assistant on 8082, mock provider, needs the compose PostgreSQL (verified)
+./gradlew :triaxis-assistant-service:bootRun --args='--spring.profiles.active=local'          # assistant on 8082, mock provider, needs the compose PostgreSQL, Kafka and Redis (verified)
 ./gradlew :triaxis-assistant-service:bootRun --args='--spring.profiles.active=local,gemini'   # with Gemini; needs GEMINI_API_KEY in the environment (verified)
 ./gradlew :triaxis-auth-service:bootRun --args='--spring.profiles.active=local'   # auth on 8083, demo users nurse/doctor (verified)
 docker compose up -d                              # PostgreSQL (pgvector), Kafka (topic triaje.eventos), Redis (verified); services are added in phase 8

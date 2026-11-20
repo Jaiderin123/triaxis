@@ -13,18 +13,34 @@ Working checklist. Follow the phases in order; tick boxes as work lands. Source 
 | Platform foundation (errors, observability, hardening) | done | `platform-foundation` |
 | 4 Escalation | done | `phase-4-escalation` |
 | 5 Assistant | done | `phase-5-assistant` |
+| Review fixes of 2026-11-19 (between phases 5 and 6) | done | `review-2026-11-19` |
 | 6 Operation report | next | |
 | 7 Alerts | pending | |
 | 8 Deployment | pending | |
 | 9 Docs | pending | |
 
+### Definition of done for phases 6 to 9 (engineering rules of the review of 2026-11-19)
+
+Every pull request of phases 6 to 9 checks, in addition to the build and `scripts/check-docs.sh` (the rules are in `CLAUDE.md`):
+
+- [ ] Every remote call and every wait has an explicit timeout; every background loop has a per-cycle timeout.
+- [ ] Time handling in the database and in SQL is UTC; the test JVM runs in a non-UTC zone.
+- [ ] No model output, patient data, question or secret is logged; records holding secrets override `toString`.
+- [ ] Every new route has its explicit rule and a test per role (the route rule test passes).
+- [ ] Every new configuration property is validated and documented in `ARCHITECTURE.md` section 10.
+- [ ] A task is ticked only after it was verified; a decision changed in the code updates or supersedes its ADR in the same pull request.
+- [ ] Concurrency tests force the interleavings they claim; no `Thread.sleep` to synchronize.
+- [ ] Read models and markers use keys of their own; the replica assumptions of a background process are stated.
+- [ ] A fresh clone of the branch compiles.
+
 ### Where to resume (phase 6)
 
-Phases 4 and 5 are released to `main` (tags `phase-4-escalation` and `phase-5-assistant`). Next is phase 6, the operation report (RF-05):
+Phases 4 and 5 are released to `main` (tags `phase-4-escalation` and `phase-5-assistant`), and so are the fixes of the review of 2026-11-19 (tag `review-2026-11-19`). Next is phase 6, the operation report (RF-05):
 
 - Plan it first and record the approved decisions in the Phase 6 section before writing code (CLAUDE.md, documentation sync item 7). The SQL is in `ARCHITECTURE.md` section 6.7; the assumptions A7 (discharged directly, no waiting time), A8 (hours without patients) and A12 (UTC buckets) apply.
 - One branch from `develop` and one pull request, rebase and merge; then the release pull request to `main` (merge commit) and the tag.
-- Conventions that now apply to every service: a source package named `out` is tracked (the ignore rule only covers `/out/` and `/*/out/`); check that a fresh clone compiles before each pull request; in the assistant, BlockHound is installed when the test JVM starts; errors through the shared base handler and writer; a new endpoint gets its role rule; no secrets in the repository.
+- Conventions that now apply to every service: the definition of done above; a source package named `out` is tracked (the ignore rule only covers `/out/` and `/*/out/`); in the assistant, BlockHound is installed when the test JVM starts; errors through the shared base handler and writer; the security chain denies every route without its rule; database sessions are UTC; no secrets in the repository.
+- For the report: `date_trunc('hour', ...)` gives UTC hours because the session is UTC (ADR 0022, tested in `SessionTimeZoneTest`); the endpoint is `DOCTOR` only and needs its rule in `SecurityRulesConfiguration`.
 - Documentation sync: follow the checklist in `CLAUDE.md` and run `scripts/check-docs.sh` before each pull request.
 
 ## Cut list and priorities
@@ -61,7 +77,8 @@ Tasks
 - [x] JDK 21 and Kubernetes tools (`kubectl`, `kind`) available locally
 - [x] `docs/private/` holds the requirements specification and is in `.gitignore`
 - [x] `git init`, first commit on `main`, create `develop`; set the repository-local `user.name` and `user.email` to the author's own identity; `.claude/` goes in `.git/info/exclude`
-- [x] Create the remote repository, push `main` and `develop`, set branch protection (see `GIT_WORKFLOW.md`)
+- [x] Create the remote repository, push `main` and `develop`
+- [ ] Branch protection on `main` and `develop`: pull request required, no direct pushes or force-pushes, no required status checks because there is no CI (see `GIT_WORKFLOW.md`). It was marked done here by mistake and found missing in the review of 2026-11-19
 - [x] `triaxis-triage-service` fixed to Boot 3.5.16 (catalog plugins, Boot 3 starters, nested wrapper and `settings.gradle` removed, port 8081)
 - [x] Create `triaxis-common`, `triaxis-security`, `triaxis-assistant-service`, `triaxis-auth-service` (build files, main classes, `application.yml` with port and name only) and include them in `settings.gradle`
 - [x] `docker-compose.yml`: PostgreSQL with pgvector (two databases through an init script), Kafka (KRaft, topic `triaje.eventos` with 3 partitions), Redis
@@ -250,9 +267,15 @@ Tasks
 - [ ] One Dockerfile per service (pinned base image tags, no `latest`)
 - [ ] `docker-compose.yml` runs infrastructure plus the three services; `mock` LLM by default
 - [ ] `deploy/k8s/`: namespace, Deployments with probes and resources, Services, ConfigMap, Secrets, Ingress with `/auth`, `/triage`, `/asistente`; PostgreSQL, Kafka, Redis single replica
-- [ ] Validate on kind or minikube (not installed on the dev machine yet)
+- [ ] Validate on kind (kind 0.33.0 and kubectl 1.34.13 are in `~/.local/bin`)
 - [ ] Azure: choose AKS or Container Apps (ADR 0010), set a budget alert, **an early smoke deploy**, record the URL
 - [ ] Decide which LLM profile the deployed environment uses (ASSUMPTIONS A16)
+- [ ] The assistant runs with `replicas: 1` (ASSUMPTIONS A39); triage and auth may run more
+- [ ] Rate limit of the token endpoint behind the Ingress (from the review, finding A2): count only failed attempts, check the address before the username, set `server.forward-headers-strategy` explicitly and trust only the forwarded address of the Ingress (ASSUMPTIONS A28, ADR 0020)
+- [ ] Database roles: one role per service instead of the shared superuser; the schema scripts run with an owner role (a Job or an init container) and the services with `spring.sql.init.mode: never`; the runtime role of triage only has `INSERT` and `SELECT` on `patient_audit` (ADR 0014)
+- [ ] Compose: publish the infrastructure ports on `127.0.0.1` only and pin exact image tags (`pgvector/pgvector`, `redis`, also in the test containers); a password for Redis
+- [ ] The Ingress does not route `/actuator` (ADR 0020, ASSUMPTIONS A29); the Redis of the deployment uses `maxmemory-policy noeviction`; the retention of `triaje.eventos` is set explicitly (7 days, ADR 0021)
+- [ ] `auth.users` comes from a Kubernetes Secret (ARCHITECTURE section 10); auth logs a warning when it starts without users
 
 Definition of done: `docker compose up --build` brings the system up and the sample flow works with curl; `kubectl apply -f deploy/k8s/` works on the local cluster; the Azure URL answers `/actuator/health/readiness`.
 
@@ -276,7 +299,7 @@ First commit: `docs: complete README and architecture decision records`
 
 ## Final checklist (deliverables of the specification)
 
-- [ ] Source repository with the complete code (public, or private with access for the reviewer)
+- [ ] Source repository with the complete code (public, or private with access for the people who need it)
 - [ ] README with a one-command local run, an architecture diagram, technologies and key decisions with justification
 - [ ] Automated unit and integration tests covering: E1 to E6, valid and invalid transitions, escalation idempotency, RAG citations, no-match without hallucination
 - [ ] Deployed URL on Azure with the APIs reachable, plus the Kubernetes manifests used
@@ -424,11 +447,42 @@ One entry per finished piece of work: what was done, decisions taken, how it was
     - a doctor reads the view, and a call without a token gets 401.
 - **Not verified yet:** several assistant replicas sharing the consumer group, and the services in containers (phase 8).
 
+### Review fixes of 2026-11-19 (done, between phases 5 and 6)
+
+- **What:** a full review of phases 0 to 5 with the `code-reviewer` agent (4 scopes in parallel; report in `docs/private/reviews/2026-11-19-full-review.md`, not versioned). It found no critical finding and 7 high ones. Fixed, one commit each:
+  1. **A6:** the model output is never logged. The reply is parsed with our own `ObjectMapper`, because the Spring AI converter logged the whole text at ERROR.
+  2. **UTC:** database sessions run in UTC through a connection customizer, and every test JVM runs in `America/Bogota`.
+  3. **A1:** the JWKS download has timeouts and a refresh limit for unknown key ids.
+  4. **A3:** R2DBC pool and session limits; timeouts per escalation batch, per relay cycle and on the similarity search; a database failure of the assistant is a 503.
+  5. **A4:** the urgency view uses its own marker key (`urgency:initialized`), and the startup check retries and restarts the listener when Redis does not answer.
+  6. **A5:** negative counts never break the view, and the assistant runs as a single replica (A39).
+  7. **Security:** deny by default with a route rule test in every service; `exp` is required; tests for `alg: none` and HS256 with the public key.
+  8. **Small items:** `toString` without secrets, the retries of Spring AI off (`max-attempts: 1`), the JUnit timeout in the assistant, and key files ignored.
+- **Decisions:** ADR 0022 (deny by default, bounded waits, UTC sessions); assumptions A39 (single replica of the assistant) and A40 (the SLA is fixed at registration); A3, A12, A13, A28, A29 and A38 updated.
+- **Moved to phase 8:** A2 (the rate limit behind the Ingress), database roles with the DDL out of the startup, compose ports on `127.0.0.1` with exact tags, and the Ingress without `/actuator`. The rest of the review is in the improvements below.
+- **Not done:** the branch protection was marked done in phase 0 but did not exist. It is unticked until it is applied.
+- **Verified:**
+  - `./gradlew build` passes for every module (453 tests) and `scripts/check-docs.sh` passes.
+  - Each fix has a test that fails without it: the log capture, the session zone, the slow and unreachable JWKS, the stuck batch, the lost view, the negative count, a route without a rule and a token without `exp`.
+- **Engineering rules:** the rules that would have prevented these findings are in `CLAUDE.md` and in the definition of done of phases 6 to 9 above.
+
 ---
 
 ## Improvements (out of scope for now)
 
 Ideas that were consciously left out of the first delivery:
+
+From the review of 2026-11-19 (report in `docs/private/reviews/`, not versioned), accepted as debt:
+
+- Outbox: a dead letter (attempts and last error per row, a `failed` state for errors that cannot be retried) and a time budget per cycle, so one event never blocks the rest and a degraded Kafka does not hold a transaction for minutes.
+- Urgency listener: retry only transient Redis errors, count the retries, and pause the container instead of blocking the consumer thread when the records in flight are exhausted.
+- LLM: a bulkhead (`resilience4j-bulkhead` is already on the classpath), a rate limit per user on `POST /asistente/consulta`, and an HTTP timeout in the Gemini client itself.
+- Prompt hardening: the question delimited in its own message, the numbered excerpts apart, and lines of the question that imitate an excerpt (`[n] ...`) neutralized; a test with a malicious question.
+- Embedding identity: include the dimensions and the task type in the stored model name, so a change of either embeds the corpus again.
+- Deterministic race tests: force both interleavings of a concurrent `PATCH` and the escalation (held transactions), and replace the remaining `Thread.sleep` polling with controllable schedulers.
+- Tests for auth: the use case `IssueTokenService` with fakes, the address limit on a real endpoint, the type of the decoder errors; BlockHound explicitly over the outbox relay.
+- A dependency scanner (OWASP Dependency-Check, Dependabot or Trivy); it is a new dependency and needs approval.
+- Smaller items: a cooperative `stop()` of the background loops (no duplicate sends on shutdown); `concatMap(..., 0)` after `onBackpressureDrop`; `send-timeout` greater than `max.block.ms` plus `delivery.timeout.ms`; instants truncated to microseconds in the clock; `TriageProperties` validated; BCrypt explicitly on `boundedElastic`; a bounded rate limiter map; RSA keys of at least 2048 bits checked at startup; unused dependencies (`spring-boot-starter-validation` in triage and the assistant, `spring-boot-starter-aop` in the assistant, `triaxis-common` and the resource server starter in auth); leftovers of the project generator in `triaxis-triage-service/.gitignore` and `.gitattributes`; a JaCoCo threshold and the foojay toolchain resolver; a metric of failed logins; the Lua script of the urgency view uses keys of different slots (not compatible with Redis Cluster); records of the event contract with primitives default to 0 or false when a field is missing.
 
 - Read endpoint for the clinical audit (`GET /triage/pacientes/{id}/auditoria`); the audit is written and protected, but only readable through the database.
 - Write the trace id as the nested ECS field `trace.id` instead of the top-level `traceId` of the JSON log line.
