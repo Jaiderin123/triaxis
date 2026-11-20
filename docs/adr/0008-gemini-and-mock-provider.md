@@ -37,7 +37,7 @@ The assistant needs a chat model and an embedding model. The specification leave
 
 - **Ollama with a local model:** no key and no cost, but it needs several gigabytes of model files and a GPU or patience. It does not fit the cluster budget of the deployment.
 - **DeepSeek or other hosted APIs:** comparable, but they offer no first-party embeddings in Spring AI 1.1, so two providers would be needed.
-- **OpenAI or Anthropic models:** good options, but they are paid from the first call, while Gemini has a free tier that covers development and the evaluation.
+- **OpenAI or Anthropic models:** good options, but they are paid from the first call, while Gemini has a free tier that covers development and the demonstration.
 - **Only a real provider, no mock:** anyone running the project would need a key, and tests could not be deterministic.
 
 ## Consequences

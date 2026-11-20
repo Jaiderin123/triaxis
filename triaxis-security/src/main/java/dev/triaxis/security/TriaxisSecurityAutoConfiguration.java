@@ -39,7 +39,8 @@ public class TriaxisSecurityAutoConfiguration {
 	@ConditionalOnMissingBean(ReactiveJwtDecoder.class)
 	ReactiveJwtDecoder triaxisJwtDecoder(TriaxisSecurityProperties properties) {
 		Assert.hasText(properties.jwksUri(), "triaxis.security.jwks-uri must be set");
-		return TriaxisJwtDecoders.fromJwkSetUri(properties.jwksUri(), properties.issuer(), properties.audience());
+		return TriaxisJwtDecoders.fromJwkSetUri(properties.jwksUri(), properties.issuer(), properties.audience(),
+				properties.jwks().settings());
 	}
 
 	@Bean
@@ -66,7 +67,9 @@ public class TriaxisSecurityAutoConfiguration {
 				.authorizeExchange(exchanges -> {
 					exchanges.pathMatchers("/actuator/health", "/actuator/health/**").permitAll();
 					customizers.orderedStream().forEach(customizer -> customizer.customize(exchanges));
-					exchanges.anyExchange().authenticated();
+					exchanges.pathMatchers("/actuator/info").authenticated();
+					// Deny by default: a route without an explicit rule is refused, even with a valid token.
+					exchanges.anyExchange().denyAll();
 				})
 				.exceptionHandling(handling -> handling.authenticationEntryPoint(entryPoint).accessDeniedHandler(denied))
 				.oauth2ResourceServer(oauth2 -> oauth2

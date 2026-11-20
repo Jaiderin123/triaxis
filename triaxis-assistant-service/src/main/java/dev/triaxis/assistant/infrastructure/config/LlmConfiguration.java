@@ -1,5 +1,6 @@
 package dev.triaxis.assistant.infrastructure.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.triaxis.assistant.application.port.out.LlmPort;
 import dev.triaxis.assistant.infrastructure.adapter.out.llm.ResilientLlmAdapter;
 import dev.triaxis.assistant.infrastructure.adapter.out.llm.gemini.GeminiLlmAdapter;
@@ -37,8 +38,9 @@ class LlmConfiguration {
 	@Bean(PROVIDER)
 	@ConditionalOnProperty(prefix = "assistant.llm", name = "provider", havingValue = "gemini")
 	LlmPort geminiLlm(ChatModel chatModel, EmbeddingModel embeddingModel,
-			@Value("${spring.ai.google.genai.embedding.text.options.model}") String embeddingModelName) {
-		return new GeminiLlmAdapter(chatModel, embeddingModel, embeddingModelName);
+			@Value("${spring.ai.google.genai.embedding.text.options.model}") String embeddingModelName,
+			ObjectMapper json) {
+		return new GeminiLlmAdapter(chatModel, embeddingModel, embeddingModelName, json);
 	}
 
 	@Bean

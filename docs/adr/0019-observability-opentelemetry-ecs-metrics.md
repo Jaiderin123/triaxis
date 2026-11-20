@@ -14,7 +14,7 @@ The requirements specification asks for health and readiness probes, structured 
 - **Correlation:** the trace id is the correlation id. It appears in every log line, in the error bodies (`traceId`), in the outbox row and in the Kafka headers `correlationId` (trace id) and `traceparent` (W3C), so a consumer can continue the trace. The custom correlation filter was removed.
 - **Logs:** Spring Boot structured logging in ECS (Elastic Common Schema) JSON on the console, with the service name. The `local` profile switches to plain text. Logs are written to standard output and collected by the platform (Container Insights in Azure); they are never stored in the application database. The clinical audit (ADR 0014) is a different thing and lives in PostgreSQL.
 - **Access log:** one structured line per request with method, path, status, duration and user. Never bodies, headers, tokens or query strings. Health probes are skipped.
-- **Metrics:** Micrometer with a Prometheus endpoint and a common tag `application`. Business metrics: `triage.classification` by level, `triage.outbox.*`, and, in later phases, escalations and LLM latency. The endpoint is protected (ADR 0020).
+- **Metrics:** Micrometer with a Prometheus endpoint and a common tag `application`. Business metrics: `triage.classification` by level, `triage.outbox.*`, and, added later, `triage.escalations` (phase 4) and the assistant metrics (phase 5). The endpoint is protected (ADR 0020).
 - **Health:** liveness uses the liveness state only. Readiness of the triage service includes the database but not Kafka: the outbox absorbs a Kafka outage, so a broker problem must not take the pod out of service. Shutdown is graceful.
 
 ## Alternatives considered

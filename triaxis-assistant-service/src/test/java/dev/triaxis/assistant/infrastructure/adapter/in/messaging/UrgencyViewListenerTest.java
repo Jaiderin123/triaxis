@@ -136,11 +136,46 @@ class UrgencyViewListenerTest {
 		assertThat(view().active().get(TriageLevel.URGENT_2)).isPositive();
 	}
 
+	/**
+	 * Redis is lost while the listener runs and an event arrives before the restart (it recreates the metadata):
+	 * the restart still rebuilds the whole view, because only a reset marks the view as built.
+	 */
+	@Test
+	void aViewLostWhileRunningIsRebuiltAtTheNextRestart() throws Exception {
+		send(UUID.randomUUID(), EventType.PACIENTE_REGISTRADO, EventLevel.NO_URGENTE);
+		UrgencyView before = settled();
+		assertThat(before.active().get(TriageLevel.NOT_URGENT)).isPositive();
+
+		flushRedis();
+		send(UUID.randomUUID(), EventType.PACIENTE_REGISTRADO, EventLevel.URGENTE);
+		await("the event after the loss", () -> view().active().get(TriageLevel.URGENT) > 0);
+		assertThat(view().total()).isEqualTo(1);
+
+		restart();
+
+		Map<TriageLevel, Long> expected = plus(before, TriageLevel.URGENT, 1);
+		await("the whole view rebuilt", () -> view().active().equals(expected));
+	}
+
+	private void restart() throws InterruptedException {
+		MessageListenerContainer container = containers.getListenerContainer(UrgencyViewListener.CONTAINER);
+		container.stop();
+		await("the listener to stop", () -> !container.isRunning());
+		container.start();
+	}
+
+	private void flushRedis() {
+		java.util.List<String> keys = redis.scan().collectList().block();
+		if (!keys.isEmpty()) {
+			redis.delete(keys.toArray(String[]::new)).block();
+		}
+	}
+
 	private void restartWithAnEmptyRedis() throws InterruptedException {
 		MessageListenerContainer container = containers.getListenerContainer(UrgencyViewListener.CONTAINER);
 		container.stop();
 		await("the listener to stop", () -> !container.isRunning());
-		redis.delete(redis.scan().collectList().block().toArray(String[]::new)).block();
+		flushRedis();
 		assertThat(view().total()).isZero();
 		container.start();
 	}

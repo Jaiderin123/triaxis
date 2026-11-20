@@ -47,7 +47,7 @@ Backend only. No frontend.
 
 ```mermaid
 flowchart LR
-    client([Client / evaluator])
+    client([Client])
 
     subgraph Triaxis
         auth[auth-service<br/>JWT RS256 + JWKS]
@@ -142,7 +142,7 @@ Detailed layout of `triage-service` (the other services follow the same shape):
 ```
 dev.triaxis.triage
 ├── domain
-│   ├── model            Patient, VitalSigns, TriageLevel, PatientStatus, AuditEntry, DomainEvent
+│   ├── model            Patient, VitalSigns, TriageLevel, PatientStatus, AuditEntry, PatientEvent
 │   ├── rule             TriageLevelRule (interface) + one class per level   (Strategy)
 │   ├── service          TriageClassifier, SlaPolicy, StatusTransitionPolicy
 │   └── exception
@@ -175,11 +175,11 @@ Consequences of using functional endpoints (and how each is handled):
 
 | Topic | With `@RestController` | With functional endpoints (this project) |
 |---|---|---|
-| Bean validation | `@Valid` on the body | Handler calls `RequestValidator` (Spring `Validator`), which collects violations and throws a validation exception naming the field |
+| Bean validation | `@Valid` on the body | No Bean Validation in triage and the assistant: the handler only checks the JSON shape and the domain validates the data, reporting every violation with its field (ADR 0017); auth validates its small request with a `RequestValidator` |
 | Error handling | `@RestControllerAdvice` | `@RestControllerAdvice` does **not** apply; a `WebExceptionHandler` maps exceptions to `ProblemDetail` |
 | Authorization | Often `@PreAuthorize` | Path and method rules in `SecurityWebFilterChain` (for example `POST /triage/pacientes` requires `NURSE`) |
 | OpenAPI | Automatic | Not automatic; keep a hand-written `openapi.yaml` or add springdoc router annotations (optional) |
-| Controller tests | `@WebFluxTest` | `WebTestClient.bindToRouterFunction(router)` |
+| Controller tests | `@WebFluxTest` | `@SpringBootTest` with `WebTestClient` against the whole filter chain (security, errors, JSON settings) |
 
 ### 5.2 SOLID and design patterns
 
@@ -323,7 +323,7 @@ CREATE TABLE outbox_events (
 CREATE INDEX idx_outbox_pending ON outbox_events (id) WHERE published_at IS NULL;
 ```
 
-The schema is created by initialization scripts executed through R2DBC (no Flyway, to avoid a second JDBC driver). The R2DBC connection uses UTC as session time zone.
+The schema is created by initialization scripts executed through R2DBC (no Flyway, to avoid a second JDBC driver). Every R2DBC session runs in UTC, with `statement_timeout` 10 s and `lock_timeout` 5 s, set by a `ConnectionFactoryOptionsBuilderCustomizer` (`R2dbcSessionConfiguration`, ADR 0022); the tests run in a non-UTC JVM and check it. `patient_audit.patient_id` references `patients (id)`.
 
 ### 6.5 Events and the transactional outbox
 
@@ -333,6 +333,7 @@ Every state change writes **patient row, audit entry and outbox row in one trans
 - Single relay in flight (advisory lock) to preserve per-patient ordering.
 - Producer: `acks=all`, idempotence enabled, key = patient id (ordering per patient within a partition).
 - Delivery is **at least once**; consumers are idempotent.
+- A failed send stops the cycle, to keep the order; there is no dead letter yet, so an event that can never be sent blocks the ones after it (an improvement in `PLAN.md`). After its budget (`cycle-budget`, 30 s) a cycle stops between two events and commits what it sent (at least one event); a stuck cycle is cut by `cycle-timeout` (60 s) and rolled back.
 
 Why: publishing to Kafka directly after the database commit can lose the event (or the other way around). The outbox removes that dual-write problem.
 
@@ -528,7 +529,7 @@ Vectors are sent as text with a `CAST(... AS vector)` through R2DBC `DatabaseCli
 
 ### 7.4 Degraded mode
 
-Resilience4j circuit breaker `llm` wraps both the embedding and the chat call, with a time limiter. Failure rate threshold, sliding window and wait duration are properties. HTTP 429 and 5xx count as failures. When the breaker is open (or the call fails), the service answers **503** with a clear message. Triage is never affected.
+Resilience4j circuit breaker `llm` wraps both the embedding and the chat call, and each call has a Reactor `timeout` (embedding 5 s, answer 20 s). Failure rate threshold, sliding window and wait duration are properties. Any error of the provider counts as a failure (a network error, an HTTP error, a timeout); an answer that is not the expected JSON does not. The retries of Spring AI are off (`spring.ai.retry.max-attempts: 1`). A database failure of the similarity search is also a 503. When the breaker is open (or the call fails), the service answers **503** with a clear message. Triage is never affected.
 
 ### 7.5 Urgency view from Kafka (RF-04 B)
 
@@ -546,6 +547,8 @@ The assistant **never calls the triage API**. A consumer in its own group (`assi
 - The listener (`UrgencyViewListener`) is asynchronous, as ADR 0001 says: it returns a `Mono` and acknowledges a record only after the script succeeded, so offsets are committed only for applied events. Records may be applied out of order, which the rules allow. At most `assistant.urgency.max-in-flight` (64) records are in flight; a Redis failure is retried with back-off until it works; a record that is not a valid event is logged (without its payload), counted and skipped (ASSUMPTIONS A38).
 - If Redis is lost (no `urgency:meta` key), the consumer reads the topic again from the earliest offset when its partitions are assigned, at startup or after a restart, before it processes any record, and the same rules rebuild the counts. The view is not rebuilt while the consumer runs: with asynchronous acknowledgments a seek does not replay the records.
 - The Lua script is read once at startup (`redis/urgency-apply.lua`); a script built from a resource reads the file again on a Redis I/O thread, which BlockHound reported.
+- A built view is marked by its own key, `urgency:initialized`, written only by the reset before a replay (the script writes `urgency:meta` with every event, so that key cannot mark it). When Redis does not answer at partition assignment, the consumer waits there with back-off (`assistant.urgency.startup-check.backoff`, `max-backoff`) and consumes nothing until Redis answers; a wait longer than `max.poll.interval.ms` makes Kafka rebalance and the check start again.
+- The assistant runs as a single replica, because the rebuild is not coordinated across consumers (ASSUMPTIONS A39). A negative or unknown count is never returned: it is read as zero or ignored, logged and counted.
 - Metric `assistant.urgency.events` by outcome (`applied`, `unchanged`, `invalid`). The listener continues the trace of the `traceparent` header (Kafka observation); `correlationId` is optional (A31).
 
 `GET /asistente/estado-urgencias` returns all five levels (zeros included), a total and the time of the newest applied event:
@@ -574,11 +577,12 @@ The assistant **never calls the triage API**. A consumer in its own group (`assi
 ## 8. Authentication and authorization
 
 - `auth-service` exposes `POST /auth/token` (credentials from configuration, passwords stored hashed) and `GET /.well-known/jwks.json`.
-- Tokens are **RS256**, short-lived (15 minutes), with `sub`, `roles`, `iss`, `aud`, `iat`, `exp`, `jti` and a `kid` header. The resource servers check signature, issuer, audience and expiration (ADR 0003 and 0020).
+- Tokens are **RS256**, short-lived (15 minutes), with `sub`, `roles`, `iss`, `aud`, `iat`, `exp`, `jti` and a `kid` header. The resource servers check the signature (RS256 only), issuer, audience and expiration, and refuse a token without `exp` (ADR 0003, 0020 and 0022). They download the public keys from the JWKS endpoint with connect and response timeouts, and download them again for an unknown key id at most once per 30 seconds.
 - The private key comes from an environment variable or secret. Without it the service refuses to start, unless `auth.jwt.generate-key-if-missing` is on (local profile only), which generates a key pair with a warning.
 - `POST /auth/token` is rate limited (10 attempts per minute per username and per address) and answers 429 with `Retry-After`.
 - `triage-service` and `assistant-service` are OAuth2 resource servers that validate tokens with the public key fetched from the JWKS endpoint (lazily, so they do not need `auth-service` at startup).
 - Roles: `NURSE` (register patients) and `DOCTOR` (reports, assistant); both can change a patient's state (see ADR 0013). Reads of a patient and of the urgency view are open to both.
+- Deny by default: every route needs an explicit rule in the `AuthorizationRulesCustomizer` of its service; anything else is refused (401 without a token, 403 with one), and a test per service checks that every declared route has its rule (ADR 0022).
 - Public: Actuator liveness and readiness. `/actuator/prometheus` needs HTTP Basic with the scraper credentials. Everything else requires a valid JWT.
 - Input validation on every request; no credential is ever committed.
 
@@ -588,7 +592,7 @@ In production, identity would be delegated to a managed provider (Microsoft Entr
 
 ## 9. Event contract (`triaje.eventos`)
 
-Topic: `triaje.eventos`, 3 partitions, key = `pacienteId`. JSON value (field names in Spanish, as part of the external contract); headers: `correlationId` (the trace id), `traceparent` and `eventType`.
+Topic: `triaje.eventos`, 3 partitions, key = `pacienteId`. JSON value (field names in Spanish, as part of the external contract); headers: `correlationId` (the trace id), `traceparent` and `eventType`. Escalation events come from the scheduler, not from a request, so they carry only `eventType` (ASSUMPTIONS A31).
 
 ```json
 {
@@ -626,25 +630,28 @@ Event types: `paciente_registrado`, `paciente_en_consulta`, `paciente_alta`, `pa
 | Property or variable | Used by | Purpose |
 |---|---|---|
 | `triage.sla.minutes.*` | triage | SLA per level |
-| `triage.escalation.enabled`, `triage.escalation.interval`, `triage.escalation.batch-size` | triage | Escalation loop (defaults `true`, `PT30S`, `100`) |
+| `triage.escalation.enabled`, `triage.escalation.interval`, `triage.escalation.batch-size`, `triage.escalation.batch-timeout` | triage | Escalation loop (defaults `true`, `PT30S`, `100`, `PT60S`), validated at startup |
 | `triage.administrative-complaints` | triage | Level 5 complaint list |
-| `triage.outbox.relay.*`, `triage.outbox.topic.*` | triage | Relay loop and topic creation |
+| `triage.outbox.relay.*` (including `send-timeout` 15 s, `cycle-budget` 30 s and `cycle-timeout` 60 s, validated so that the timeout exceeds budget plus send), `triage.outbox.topic.*` | triage | Relay loop and topic creation |
 | `TRIAGE_DB_URL`, `TRIAGE_DB_USER`, `TRIAGE_DB_PASSWORD` | triage | PostgreSQL (R2DBC) |
 | `KAFKA_BOOTSTRAP_SERVERS` | triage, assistant | Kafka |
 | `AUTH_JWKS_URI` | triage, assistant | Public keys of the auth service |
 | `JWT_PRIVATE_KEY` | auth | Signing key (PKCS#8 PEM); `auth.jwt.generate-key-if-missing` only in `local` |
 | `auth.jwt.issuer`, `auth.jwt.audience`, `auth.jwt.ttl`, `auth.rate-limit.*` | auth | Token settings and rate limit |
 | `triaxis.security.issuer`, `triaxis.security.audience` | triage, assistant | Token checks |
+| `triaxis.security.jwks-uri` (`AUTH_JWKS_URI`), `triaxis.security.jwks.connect-timeout`, `response-timeout`, `refresh-cooldown` | triage, assistant | JWKS download (defaults 2 s, 3 s, 30 s) |
+| `triaxis.database.statement-timeout`, `triaxis.database.lock-timeout`, `spring.r2dbc.pool.*` | triage, assistant | Session limits (10 s, 5 s) and pool limits (`max-size` 10, acquire and create 5 s, validation 2 s) |
+| `auth.users[n].username`, `auth.users[n].password-hash`, `auth.users[n].roles` (for example `AUTH_USERS_0_USERNAME`, `AUTH_USERS_0_PASSWORDHASH`, `AUTH_USERS_0_ROLES`) | auth | Users with BCrypt hashes; only the `local` profile has demonstration users, so a deployment must provide them |
 | `METRICS_USER`, `METRICS_PASSWORD` | all | Credentials of the metrics scraper |
 | `TRACING_EXPORT_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `TRACING_SAMPLING_PROBABILITY` | all | OpenTelemetry export |
 | `assistant.rag.top-k`, `assistant.rag.max-distance` | assistant | Retrieval tuning (phase 5) |
 | `assistant.llm.provider` (`mock` by default), profile `gemini`, `GEMINI_API_KEY`, `GEMINI_CHAT_MODEL`, `GEMINI_EMBEDDING_MODEL` | assistant | LLM selection, models and key (key from the environment only); without the `gemini` profile the Gemini auto-configuration is off (ADR 0008) |
-| `assistant.rag.question-max-length`, `assistant.corpus.location`, `assistant.corpus.retry.*` | assistant | Question limit (1000), protocol folder, back-off of the corpus embedding |
+| `assistant.rag.question-max-length`, `assistant.rag.search-timeout`, `assistant.corpus.location`, `assistant.corpus.retry.*` | assistant | Question limit (1000), similarity search timeout (3 s), protocol folder, back-off of the corpus embedding |
 | `assistant.llm.timeout.*`, `resilience4j.circuitbreaker.instances.llm.*` | assistant | Timeouts (embedding 5 s, answer 20 s, `Retry-After` 30 s) and circuit breaker of the LLM calls (ADR 0004) |
 | `ASSISTANT_DB_URL`, `ASSISTANT_DB_USER`, `ASSISTANT_DB_PASSWORD` | assistant | PostgreSQL with pgvector (R2DBC) |
-| `REDIS_HOST`, `REDIS_PORT`, `assistant.urgency.discharged-ttl`, `assistant.urgency.max-in-flight`, `assistant.urgency.redis-timeout` | assistant | Urgency view: Redis, discharged marker (30 days), records in flight (64), Redis timeout (2 s) |
+| `REDIS_HOST`, `REDIS_PORT`, `assistant.urgency.discharged-ttl`, `max-in-flight`, `redis-timeout`, `reset-timeout`, `startup-check.*` | assistant | Urgency view: Redis, discharged marker (30 days), records in flight (64), Redis timeout (2 s), reset (30 s), back-off of the wait when Redis does not answer at partition assignment (2 s up to 30 s) |
 
-**Backpressure.** Kafka consumers use `max.poll.records` and a bounded `flatMap` concurrency; the outbox relay works in batches; R2DBC pool sizes and WebClient timeouts are explicit.
+**Backpressure and timeouts (ADR 0022).** Kafka consumers use `max.poll.records` and a bounded number of records in flight; the outbox relay works in batches. Every remote wait is bounded: the R2DBC pool (`max-size` 10, acquire and create 5 s) and the session (`statement_timeout`, `lock_timeout`), the JWKS download (connect 2 s, response 3 s), Kafka sends (`send-timeout`), Redis calls, and the LLM calls. Background loops have a per-cycle or per-batch timeout, so one stuck cycle never stops the loop.
 
 ---
 
@@ -657,7 +664,7 @@ Event types: `paciente_registrado`, `paciente_en_consulta`, `paciente_alta`, `pa
 | Architecture | Dependency rules between layers | ArchUnit |
 | Persistence | Conditional updates, escalation SQL (idempotency, concurrency), report SQL | Testcontainers PostgreSQL |
 | Messaging | Outbox publishes, consumer builds the Redis view, duplicate events | Testcontainers Kafka and Redis |
-| Web | Status codes, validation messages, authorization per role | `WebTestClient.bindToRouterFunction`, `spring-security-test` |
+| Web | Status codes, validation messages, authorization per role, an explicit rule for every route | `@SpringBootTest` with `WebTestClient`, `spring-security-test`, `RouteInventory` |
 | RAG | Citations present, no-match case without any LLM call, rejected invalid citation | Fake LLM and fake embeddings with controlled vectors |
 | Resilience | Breaker opens after failures and the endpoint answers 503 | Fake failing LLM |
 | Non-blocking | No blocking call on event-loop threads | BlockHound: a flow test in triage; in the assistant it is installed when the test JVM starts, so every test runs under it |
@@ -674,7 +681,7 @@ Minimum coverage required: classification E1 to E6, valid and invalid transition
 
 **Kubernetes manifests (`deploy/k8s/`):** namespace; Deployments for the three services with liveness and readiness probes and resource requests and limits; PostgreSQL, Kafka and Redis (single replica, with persistent volumes where needed); Services; ConfigMap and Secrets; one Ingress with path-based routing (`/auth`, `/triage`, `/asistente`). The same manifests are validated locally on kind or minikube. Rules that already apply to the images and manifests: configuration only through environment variables (table in section 10), graceful shutdown, readiness without Kafka for triage, `/actuator` not routed by the Ingress, a Secret for the metrics credentials, the signing key and the database passwords, non-root containers and pinned base image tags.
 
-**Azure (target, to confirm):** AKS with a single node, running the stateful pieces in the cluster to keep cost low (managed alternatives such as Event Hubs with a Kafka endpoint, Azure Cache for Redis and Azure Database for PostgreSQL cost more and add configuration). Images from a registry reachable by the cluster. Budget alert configured, resource group deleted after the evaluation. Costs and node sizing must be checked before choosing. Observability in Azure: Container Insights for the logs of standard output, a Prometheus scrape of `/actuator/prometheus` with the Secret credentials (Azure Monitor managed Prometheus or an in-cluster Prometheus), and an OTLP endpoint for traces (Application Insights or Jaeger); all optional for the deliverable and decided in the deployment ADR.
+**Azure (target, to confirm):** AKS with a single node, running the stateful pieces in the cluster to keep cost low (managed alternatives such as Event Hubs with a Kafka endpoint, Azure Cache for Redis and Azure Database for PostgreSQL cost more and add configuration). Images from a registry reachable by the cluster. Budget alert configured, resource group deleted when the demonstration ends. Costs and node sizing must be checked before choosing. Observability in Azure: Container Insights for the logs of standard output, a Prometheus scrape of `/actuator/prometheus` with the Secret credentials (Azure Monitor managed Prometheus or an in-cluster Prometheus), and an OTLP endpoint for traces (Application Insights or Jaeger); all optional for the deliverable and decided in the deployment ADR.
 
 **CI (stretch):** GitHub Actions workflow that builds and runs the tests on every push.
 
@@ -718,6 +725,7 @@ Status `written` means the file exists in `docs/adr/` (checked by `scripts/check
 | 0019 | Observability: OpenTelemetry traces, ECS logs, metrics and health | written |
 | 0020 | API hardening: audience, body limit, rate limit and protected metrics | written |
 | 0021 | Idempotent urgency view that tolerates missing, repeated and late events | written |
+| 0022 | Deny by default, bounded waits and UTC sessions (from the review of 2026-11-19) | written |
 
 At least two are required; the more concrete ones (0001, 0002, 0006, 0007) are the priority.
 
@@ -725,7 +733,7 @@ At least two are required; the more concrete ones (0001, 0002, 0006, 0007) are t
 
 ## 15. Implementation order
 
-Estimated against roughly 10 to 12 useful hours. Deliver something that runs end to end early, then deepen.
+The order follows the dependencies between the pieces. Deliver something that runs end to end early, then deepen.
 
 1. **Skeleton (1 h).** Gradle multi-module, `docker-compose` with PostgreSQL, Kafka and Redis, health endpoints, empty services starting.
 2. **Auth (1 to 1.5 h).** Token endpoint, JWKS, shared `triaxis-security` resource-server configuration. Time-boxed.

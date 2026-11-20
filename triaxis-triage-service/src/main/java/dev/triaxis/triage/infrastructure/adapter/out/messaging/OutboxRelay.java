@@ -78,6 +78,8 @@ public class OutboxRelay {
 	public Mono<Integer> relayOnce() {
 		return transaction.transactional(client.sql(LOCK).map(row -> row.get("acquired", Boolean.class)).one()
 						.flatMap(acquired -> Boolean.TRUE.equals(acquired) ? deliverBatch() : Mono.just(0)))
+				// A stuck cycle is cancelled and rolled back; events sent in it stay pending and are sent again.
+				.timeout(settings.cycleTimeout())
 				.onErrorResume(error -> {
 					failures.increment();
 					log.warn("Outbox relay cycle failed, it will be retried: {}", error.toString());
@@ -87,13 +89,17 @@ public class OutboxRelay {
 	}
 
 	private Mono<Integer> deliverBatch() {
+		long deadline = System.nanoTime() + settings.cycleBudget().toNanos();
+		java.util.concurrent.atomic.AtomicInteger started = new java.util.concurrent.atomic.AtomicInteger();
 		return client.sql(PENDING).bind("batch", settings.batchSize())
 				.map((row, metadata) -> new PendingEvent(row.get("id", Long.class), row.get("message_key", String.class),
 						row.get("event_type", String.class), row.get("correlation_id", String.class),
 						row.get("traceparent", String.class), row.get("payload", String.class)))
 				.all().collectList()
 				.flatMapMany(Flux::fromIterable)
-				.concatMap(this::deliver)
+				// Past the budget, stop between two events and commit what was sent; the first one always goes.
+				.concatMap(event -> started.getAndIncrement() > 0 && System.nanoTime() > deadline ? Mono.just(false)
+						: deliver(event))
 				.takeWhile(Boolean::booleanValue)
 				.count()
 				.map(Long::intValue);
@@ -136,7 +142,11 @@ public class OutboxRelay {
 	private Mono<Void> refreshPending() {
 		return client.sql(COUNT_PENDING).map(row -> row.get("total", Long.class)).one()
 				.doOnNext(pending::set)
-				.onErrorResume(error -> Mono.empty())
+				.timeout(settings.sendTimeout())
+				.onErrorResume(error -> {
+					log.debug("Could not refresh the pending outbox gauge: {}", error.toString());
+					return Mono.empty();
+				})
 				.then();
 	}
 

@@ -6,7 +6,7 @@
 
 ## Context
 
-The requirements specification leaves the internal architecture to the author and evaluates the choice. The services have business rules (classification, state flow, escalation, anti-hallucination) that must stay testable without databases, brokers or an LLM provider, and the infrastructure (R2DBC, Kafka, Redis, Gemini) can change.
+The requirements specification leaves the internal architecture to the author. The services have business rules (classification, state flow, escalation, anti-hallucination) that must stay testable without databases, brokers or an LLM provider, and the infrastructure (R2DBC, Kafka, Redis, Gemini) can change.
 
 ## Decision
 

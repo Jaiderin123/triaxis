@@ -4,6 +4,10 @@ spring:
   autoconfigure:
     exclude: ""
   ai:
+    retry:
+      # Spring AI retries a failed call up to 10 times by default (2 s, then x5); the circuit breaker and the
+      # timeouts of ResilientLlmAdapter decide instead (ADR 0004: no retry of the answer call).
+      max-attempts: 1
     model:
       chat: google-genai
       embedding:

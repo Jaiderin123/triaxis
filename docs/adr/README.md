@@ -34,3 +34,4 @@ Ambiguities in the requirements specification that change behavior are recorded 
 | 0019 | [Observability: OpenTelemetry traces, ECS logs, metrics and health](0019-observability-opentelemetry-ecs-metrics.md) | Accepted |
 | 0020 | [API hardening: audience, body limit, rate limit and protected metrics](0020-api-hardening.md) | Accepted |
 | 0021 | [Idempotent urgency view that tolerates missing, repeated and late events](0021-idempotent-urgency-view.md) | Accepted |
+| 0022 | [Deny by default, bounded waits and UTC sessions](0022-deny-by-default-and-bounded-waits.md) | Accepted |

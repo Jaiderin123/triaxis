@@ -36,6 +36,7 @@ class LlmConfigurationTest {
 						"spring.ai.google.genai.embedding.text.options.model=gemini-embedding-001")
 				.withBean(ChatModel.class, () -> mock(ChatModel.class))
 				.withBean(EmbeddingModel.class, () -> mock(EmbeddingModel.class))
+				.withBean(com.fasterxml.jackson.databind.ObjectMapper.class, com.fasterxml.jackson.databind.ObjectMapper::new)
 				.run(context -> {
 					assertThat(context.getBean(LlmConfiguration.PROVIDER, LlmPort.class))
 							.isInstanceOf(GeminiLlmAdapter.class);

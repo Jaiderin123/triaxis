@@ -76,10 +76,20 @@ class SecurityFilterChainTest {
 				.expectBody().jsonPath("$.status").isEqualTo(401);
 	}
 
+	/** Deny by default: a route without an explicit rule is refused even with a valid token. */
 	@Test
-	void authenticatedUserReachesGenericPath() {
-		client.mutateWith(mockJwt().authorities(new SimpleGrantedAuthority("ROLE_DOCTOR")))
-				.get().uri("/anyone").exchange().expectStatus().isOk();
+	void aRouteWithoutARuleIsDeniedEvenWithAValidToken() {
+		client.mutateWith(mockJwt().authorities(new SimpleGrantedAuthority("ROLE_DOCTOR"),
+						new SimpleGrantedAuthority("ROLE_NURSE")))
+				.get().uri("/anyone").exchange().expectStatus().isForbidden();
+	}
+
+	@Test
+	void theRouteInventoryFindsTheDeclaredRoutes() {
+		org.assertj.core.api.Assertions.assertThat(dev.triaxis.security.test.RouteInventory.of(java.util.List.of(
+						new Routes().routes())))
+				.extracting(dev.triaxis.security.test.RouteInventory.Route::pattern)
+				.containsExactly("/actuator/health/liveness", "/nurse-only", "/anyone");
 	}
 
 	@Test

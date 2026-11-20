@@ -1,5 +1,7 @@
 plugins {
 	id 'java-library'
+	// Test helpers shared with the services (RouteInventory); a core Gradle plugin, no new dependency.
+	id 'java-test-fixtures'
 }
 
 dependencies {
@@ -13,4 +15,6 @@ dependencies {
 	testImplementation 'io.projectreactor:reactor-test'
 	testImplementation 'org.springframework.security:spring-security-test'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+	testFixturesImplementation 'org.springframework.boot:spring-boot-starter-webflux'
 }

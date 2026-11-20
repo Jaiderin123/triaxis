@@ -58,9 +58,9 @@ Hotfixes: branch from `main`, pull request into `main`, then a pull request from
 - No secrets or private files.
 - The build must pass before the merge.
 
-### Branch protection (repository settings, to configure once the repository exists)
+### Branch protection (repository settings)
 
-- `main` and `develop`: require a pull request, block direct pushes and force-pushes, require the build check to pass.
+- `main` and `develop`: require a pull request, block direct pushes and force-pushes. No status check is required, because there is no CI workflow (it is on the cut list of `PLAN.md`); the build is run locally before every pull request, and a fresh clone of the branch must compile.
 - Allowed merge methods: rebase and merge for `develop`, merge commit for `main`.
 
 ## Tags

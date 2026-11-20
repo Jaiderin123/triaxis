@@ -27,6 +27,9 @@ class RedisUrgencyViewStoreTest {
 	@Autowired
 	ReactiveStringRedisTemplate redis;
 
+	@Autowired
+	io.micrometer.core.instrument.MeterRegistry meters;
+
 	@BeforeEach
 	void emptyView() {
 		store.reset().block();
@@ -99,10 +102,39 @@ class RedisUrgencyViewStoreTest {
 		assertThat(view.updatedAt()).isEqualTo(T0.plusSeconds(50));
 	}
 
+	/** A lost Redis that receives an event again must still look unbuilt, so the next start rebuilds it. */
+	@Test
+	void applyingAnEventDoesNotMarkALostViewAsBuilt() {
+		java.util.List<String> keys = redis.scan().collectList().block();
+		if (!keys.isEmpty()) {
+			redis.delete(keys.toArray(String[]::new)).block();
+		}
+
+		apply(event(UUID.randomUUID(), TriageLevel.URGENT, Kind.PRESENT, 0));
+
+		assertThat(redis.hasKey(RedisUrgencyViewStore.META).block()).isTrue();
+		assertThat(store.isInitialized().block()).isFalse();
+	}
+
+	@Test
+	void aNegativeOrForeignCountNeverBreaksTheRead() {
+		redis.opsForHash().put(RedisUrgencyViewStore.COUNTERS, "URGENT", "-1").block();
+		redis.opsForHash().put(RedisUrgencyViewStore.COUNTERS, "CRITICAL", "2").block();
+		redis.opsForHash().put(RedisUrgencyViewStore.COUNTERS, "SOMETHING_ELSE", "7").block();
+		double before = meters.counter("assistant.urgency.negative.counts", "level", "URGENT").count();
+
+		UrgencyView view = store.read().block();
+
+		assertThat(view.active()).containsEntry(TriageLevel.URGENT, 0L).containsEntry(TriageLevel.CRITICAL, 2L);
+		assertThat(view.total()).isEqualTo(2);
+		assertThat(meters.counter("assistant.urgency.negative.counts", "level", "URGENT").count())
+				.isEqualTo(before + 1);
+	}
+
 	@Test
 	void aResetEmptiesTheViewAndMarksItInitialized() {
 		apply(event(UUID.randomUUID(), TriageLevel.CRITICAL, Kind.PRESENT, 0));
-		redis.delete(RedisUrgencyViewStore.META).block();
+		redis.delete(RedisUrgencyViewStore.INITIALIZED).block();
 		assertThat(store.isInitialized().block()).isFalse();
 
 		store.reset().block();

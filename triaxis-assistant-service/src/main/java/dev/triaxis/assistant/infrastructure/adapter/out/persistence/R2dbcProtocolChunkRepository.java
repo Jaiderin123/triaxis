@@ -1,5 +1,6 @@
 package dev.triaxis.assistant.infrastructure.adapter.out.persistence;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Set;
@@ -9,13 +10,14 @@ import dev.triaxis.assistant.domain.model.ProtocolChunk;
 import dev.triaxis.assistant.domain.model.RetrievedExcerpt;
 import dev.triaxis.assistant.domain.model.StoredChunk;
 import io.r2dbc.spi.Readable;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.stereotype.Repository;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 /**
- * pgvector through plain R2DBC (ADR 0002): vectors travel as text and are cast with {@code ::vector}, so the
+ * pgvector through plain R2DBC (ADR 0002): vectors travel as text and are cast with {@code CAST(... AS vector)}, so the
  * whole path stays reactive. {@code <=>} is the cosine distance.
  */
 @Repository
@@ -47,9 +49,12 @@ class R2dbcProtocolChunkRepository implements ProtocolChunkRepository {
 			""";
 
 	private final DatabaseClient client;
+	private final Duration searchTimeout;
 
-	R2dbcProtocolChunkRepository(DatabaseClient client) {
+	R2dbcProtocolChunkRepository(DatabaseClient client,
+			@Value("${assistant.rag.search-timeout:PT3S}") Duration searchTimeout) {
 		this.client = client;
+		this.searchTimeout = searchTimeout;
 	}
 
 	@Override
@@ -92,7 +97,8 @@ class R2dbcProtocolChunkRepository implements ProtocolChunkRepository {
 				.bind("model", embeddingModel)
 				.bind("limit", limit)
 				.map(R2dbcProtocolChunkRepository::toExcerpt)
-				.all();
+				.all()
+				.timeout(searchTimeout);
 	}
 
 	private static RetrievedExcerpt toExcerpt(Readable row) {
