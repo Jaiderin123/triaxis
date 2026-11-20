@@ -39,7 +39,8 @@ public class TriaxisSecurityAutoConfiguration {
 	@ConditionalOnMissingBean(ReactiveJwtDecoder.class)
 	ReactiveJwtDecoder triaxisJwtDecoder(TriaxisSecurityProperties properties) {
 		Assert.hasText(properties.jwksUri(), "triaxis.security.jwks-uri must be set");
-		return TriaxisJwtDecoders.fromJwkSetUri(properties.jwksUri(), properties.issuer(), properties.audience());
+		return TriaxisJwtDecoders.fromJwkSetUri(properties.jwksUri(), properties.issuer(), properties.audience(),
+				properties.jwks().settings());
 	}
 
 	@Bean
