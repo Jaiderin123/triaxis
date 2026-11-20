@@ -18,7 +18,8 @@ public record OutboxProperties(@DefaultValue Relay relay, @DefaultValue Topic to
 			@DefaultValue("true") boolean enabled,
 			@DefaultValue("PT1S") Duration interval,
 			@DefaultValue("50") int batchSize,
-			@DefaultValue("PT15S") Duration sendTimeout) {
+			@DefaultValue("PT15S") Duration sendTimeout,
+			@DefaultValue("PT60S") Duration cycleTimeout) {
 	}
 
 	public record Topic(@DefaultValue("3") int partitions, @DefaultValue("1") short replicas) {

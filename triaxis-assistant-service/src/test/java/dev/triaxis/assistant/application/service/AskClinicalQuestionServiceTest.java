@@ -44,6 +44,7 @@ class AskClinicalQuestionServiceTest {
 		List<RetrievedExcerpt> retrieved = List.of();
 		Function<List<NumberedExcerpt>, Mono<ModelAnswer>> reply = sent -> Mono.just(ModelAnswer.unusable());
 		Mono<float[]> embedding = Mono.just(new float[] {1f});
+		RuntimeException searchFailure;
 		final List<List<NumberedExcerpt>> modelCalls = new ArrayList<>();
 		final List<AnswerOutcome> outcomes = new ArrayList<>();
 		String lastSearchModel;
@@ -69,7 +70,7 @@ class AskClinicalQuestionServiceTest {
 		@Override
 		public Flux<RetrievedExcerpt> findNearest(float[] query, String embeddingModel, int limit) {
 			lastSearchModel = embeddingModel;
-			return Flux.fromIterable(retrieved).take(limit);
+			return searchFailure != null ? Flux.error(searchFailure) : Flux.fromIterable(retrieved).take(limit);
 		}
 
 		@Override
@@ -167,6 +168,18 @@ class AskClinicalQuestionServiceTest {
 
 		StepVerifier.create(early.ask("¿Medidas?")).expectError(AssistantUnavailableException.class).verify();
 		assertThat(fakes.outcomes).containsExactly(AnswerOutcome.DEGRADED);
+	}
+
+	@Test
+	void aFailingProtocolStoreIsUnavailableNotAServerError() {
+		fakes.searchFailure = new IllegalStateException("connection refused");
+
+		StepVerifier.create(service.ask("¿Medidas?"))
+				.expectErrorSatisfies(error -> assertThat(error).isInstanceOf(AssistantUnavailableException.class)
+						.hasMessageContaining("protocol store"))
+				.verify();
+		assertThat(fakes.outcomes).containsExactly(AnswerOutcome.DEGRADED);
+		assertThat(fakes.modelCalls).isEmpty();
 	}
 
 	@Test

@@ -16,7 +16,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class EscalationSchedulerTest {
 
-	/** Returns the scripted results in order, then zero; an error entry fails that call. */
+	private static final String STUCK = "stuck";
+
+	/** Returns the scripted results in order, then zero; an error entry fails that call, STUCK never completes. */
 	private static final class ScriptedEscalation implements EscalateOverduePatientsUseCase {
 
 		private final Deque<Object> script;
@@ -31,6 +33,9 @@ class EscalationSchedulerTest {
 			return Mono.defer(() -> {
 				calls.incrementAndGet();
 				Object next = script.isEmpty() ? 0 : script.poll();
+				if (next instanceof String stuck && stuck.equals(STUCK)) {
+					return Mono.never();
+				}
 				return next instanceof RuntimeException error ? Mono.error(error) : Mono.just((Integer) next);
 			});
 		}
@@ -43,7 +48,7 @@ class EscalationSchedulerTest {
 	}
 
 	private static EscalationScheduler scheduler(EscalateOverduePatientsUseCase escalation, Duration interval) {
-		return new EscalationScheduler(escalation, new EscalationProperties(true, interval, 2));
+		return new EscalationScheduler(escalation, new EscalationProperties(true, interval, 2, Duration.ofMillis(200)));
 	}
 
 	@Test
@@ -53,6 +58,26 @@ class EscalationSchedulerTest {
 		StepVerifier.create(scheduler(escalation, Duration.ofHours(1)).runCycle()).expectNext(5).verifyComplete();
 
 		assertThat(escalation.calls).hasValue(3);
+	}
+
+	/** A batch that never completes (a database call that hangs) is cut by the batch timeout. */
+	@Test
+	void aStuckBatchIsCutByItsTimeoutAndTheLoopGoesOn() throws Exception {
+		ScriptedEscalation escalation = new ScriptedEscalation(List.of(STUCK, 1));
+		EscalationScheduler scheduler = scheduler(escalation, Duration.ofMillis(50));
+
+		StepVerifier.create(scheduler.runCycle()).expectNext(0).verifyComplete();
+
+		scheduler.start();
+		try {
+			for (int attempt = 0; attempt < 100 && escalation.calls.get() < 3; attempt++) {
+				Thread.sleep(20);
+			}
+			assertThat(escalation.calls.get()).as("cycles after the stuck one").isGreaterThanOrEqualTo(3);
+		}
+		finally {
+			scheduler.stop();
+		}
 	}
 
 	@Test

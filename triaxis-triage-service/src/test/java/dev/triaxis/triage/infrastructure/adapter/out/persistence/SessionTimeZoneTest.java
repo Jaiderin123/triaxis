@@ -9,7 +9,7 @@ import org.springframework.r2dbc.core.DatabaseClient;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** The R2DBC session runs in UTC even though the test JVM does not (ASSUMPTIONS A12). */
+/** Settings of every R2DBC session: UTC even though the test JVM is not (A12), and time limits. */
 @TriageIntegrationTest
 class SessionTimeZoneTest {
 
@@ -28,6 +28,12 @@ class SessionTimeZoneTest {
 	@Test
 	void theDatabaseSessionIsInUtc() {
 		assertThat(query("SELECT current_setting('TimeZone')")).isEqualTo("UTC");
+	}
+
+	@Test
+	void statementsAndLockWaitsHaveATimeLimit() {
+		assertThat(query("SELECT current_setting('statement_timeout')")).isEqualTo("10s");
+		assertThat(query("SELECT current_setting('lock_timeout')")).isEqualTo("5s");
 	}
 
 	@Test

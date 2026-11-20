@@ -16,6 +16,12 @@ spring:
     url: ${ASSISTANT_DB_URL:}
     username: ${ASSISTANT_DB_USER:}
     password: ${ASSISTANT_DB_PASSWORD:}
+    pool:
+      # Explicit limits: without them the pool waits forever for a connection (r2dbc-pool has no default).
+      max-size: 10
+      max-acquire-time: 5s
+      max-create-connection-time: 5s
+      max-validation-time: 2s
   autoconfigure:
     # This Spring AI auto-configuration ignores spring.ai.model.embedding.text and asks for Gemini credentials
     # even when Gemini is not used; the gemini profile includes it again.
@@ -90,6 +96,10 @@ management:
         enabled: ${TRACING_EXPORT_ENABLED:false}
 
 triaxis:
+  database:
+    # Session limits set by R2dbcSessionConfiguration (PostgreSQL statement_timeout and lock_timeout).
+    statement-timeout: PT10S
+    lock-timeout: PT5S
   web:
     metrics:
       # Credentials of the metrics scraper; without a password /actuator/prometheus is denied.
@@ -112,6 +122,8 @@ assistant:
     # 0.60, the closest section to the diabetes question at 0.82 (ASSUMPTIONS A36).
     max-distance: 0.70
     question-max-length: 1000
+    # Longest wait for the similarity search; a failure or timeout of the database is a 503 (ADR 0004).
+    search-timeout: PT3S
   urgency:
     # A discharged patient is remembered longer than the topic keeps events (7 days), see ADR 0021.
     discharged-ttl: P30D

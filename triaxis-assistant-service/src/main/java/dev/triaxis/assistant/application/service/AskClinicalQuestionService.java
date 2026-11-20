@@ -53,7 +53,9 @@ public class AskClinicalQuestionService implements AskClinicalQuestionUseCase {
 
 	private Mono<ClinicalAnswer> answer(String question) {
 		return llm.embed(question)
-				.flatMap(vector -> chunks.findNearest(vector, llm.embeddingModel(), retrieval.topK()).collectList())
+				.flatMap(vector -> chunks.findNearest(vector, llm.embeddingModel(), retrieval.topK()).collectList()
+						.onErrorMap(error -> new AssistantUnavailableException("The protocol store is unavailable",
+								error)))
 				.map(retrieval::relevant)
 				.flatMap(relevant -> relevant.isEmpty() ? Mono.just(ClinicalAnswer.noProtocol())
 						: generate(question, relevant));

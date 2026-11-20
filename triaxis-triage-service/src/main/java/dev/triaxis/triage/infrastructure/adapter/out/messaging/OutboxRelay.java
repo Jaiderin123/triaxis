@@ -78,6 +78,8 @@ public class OutboxRelay {
 	public Mono<Integer> relayOnce() {
 		return transaction.transactional(client.sql(LOCK).map(row -> row.get("acquired", Boolean.class)).one()
 						.flatMap(acquired -> Boolean.TRUE.equals(acquired) ? deliverBatch() : Mono.just(0)))
+				// A stuck cycle is cancelled and rolled back; events sent in it stay pending and are sent again.
+				.timeout(settings.cycleTimeout())
 				.onErrorResume(error -> {
 					failures.increment();
 					log.warn("Outbox relay cycle failed, it will be retried: {}", error.toString());
@@ -136,7 +138,11 @@ public class OutboxRelay {
 	private Mono<Void> refreshPending() {
 		return client.sql(COUNT_PENDING).map(row -> row.get("total", Long.class)).one()
 				.doOnNext(pending::set)
-				.onErrorResume(error -> Mono.empty())
+				.timeout(settings.sendTimeout())
+				.onErrorResume(error -> {
+					log.debug("Could not refresh the pending outbox gauge: {}", error.toString());
+					return Mono.empty();
+				})
 				.then();
 	}
 

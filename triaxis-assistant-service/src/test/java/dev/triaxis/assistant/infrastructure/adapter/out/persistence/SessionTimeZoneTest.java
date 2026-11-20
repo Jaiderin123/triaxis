@@ -21,6 +21,8 @@ class SessionTimeZoneTest {
 		assertThat(TimeZone.getDefault().getID()).isEqualTo("America/Bogota");
 		assertThat(database.sql("SELECT current_setting('TimeZone')").map(row -> row.get(0, String.class)).one()
 				.block()).isEqualTo("UTC");
+		assertThat(database.sql("SELECT current_setting('statement_timeout')").map(row -> row.get(0, String.class))
+				.one().block()).isEqualTo("10s");
 	}
 
 }

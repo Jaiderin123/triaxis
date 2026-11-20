@@ -11,10 +11,12 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param enabled    runs the periodic loop; tests switch it off and call the use case
  * @param interval   time between two cycles
  * @param batchSize  patients escalated per statement; a full batch starts another one at once
+ * @param batchTimeout  longest time of one batch; a stuck batch fails and the loop goes on at the next tick
  */
 @ConfigurationProperties("triage.escalation")
 public record EscalationProperties(
 		@DefaultValue("true") boolean enabled,
 		@DefaultValue("PT30S") Duration interval,
-		@DefaultValue("100") int batchSize) {
+		@DefaultValue("100") int batchSize,
+		@DefaultValue("PT20S") Duration batchTimeout) {
 }
