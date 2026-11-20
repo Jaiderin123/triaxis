@@ -31,4 +31,13 @@ public record PatientEvent(
 				updated.slaMinutes(), updated.escalated());
 	}
 
+	/** The patient exceeded its SLA; the status does not change, so it is both the previous and the new one. */
+	public static PatientEvent escalated(UUID eventId, Patient escalated) {
+		if (!escalated.escalated() || escalated.escalatedAt() == null) {
+			throw new IllegalArgumentException("Patient " + escalated.id() + " is not escalated");
+		}
+		return new PatientEvent(eventId, PatientEventType.ESCALATED, escalated.escalatedAt(), escalated.id(),
+				escalated.level(), escalated.status(), escalated.status(), escalated.slaMinutes(), true);
+	}
+
 }
