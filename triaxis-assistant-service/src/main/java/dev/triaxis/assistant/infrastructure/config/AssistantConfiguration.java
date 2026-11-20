@@ -11,6 +11,8 @@ import dev.triaxis.assistant.application.port.out.ProtocolChunkRepository;
 import dev.triaxis.assistant.application.port.out.ProtocolSource;
 import dev.triaxis.assistant.application.service.AskClinicalQuestionService;
 import dev.triaxis.assistant.application.service.CorpusState;
+import dev.triaxis.assistant.application.service.UrgencyViewService;
+import dev.triaxis.assistant.application.port.out.UrgencyViewStore;
 import dev.triaxis.assistant.application.service.IngestCorpusService;
 import dev.triaxis.assistant.domain.service.CitationValidator;
 import dev.triaxis.assistant.domain.service.ProtocolParser;
@@ -51,6 +53,12 @@ class AssistantConfiguration {
 			CorpusState corpus, AssistantMetrics metrics, RagProperties rag) {
 		return new AskClinicalQuestionService(llm, chunks, corpus, metrics, new QuestionPolicy(rag.questionMaxLength()),
 				new RetrievalPolicy(rag.topK(), rag.maxDistance()), new CitationValidator());
+	}
+
+	/** One service implements both the apply and the read use cases of the urgency view. */
+	@Bean
+	UrgencyViewService urgencyViewService(UrgencyViewStore store) {
+		return new UrgencyViewService(store);
 	}
 
 }

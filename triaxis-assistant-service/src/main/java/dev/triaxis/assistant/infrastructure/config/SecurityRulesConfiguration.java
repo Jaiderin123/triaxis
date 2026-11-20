@@ -11,7 +11,9 @@ class SecurityRulesConfiguration {
 
 	@Bean
 	AuthorizationRulesCustomizer assistantAuthorizationRules() {
-		return exchanges -> exchanges.pathMatchers(HttpMethod.POST, "/asistente/consulta").hasRole("DOCTOR");
+		return exchanges -> exchanges
+				.pathMatchers(HttpMethod.POST, "/asistente/consulta").hasRole("DOCTOR")
+				.pathMatchers(HttpMethod.GET, "/asistente/estado-urgencias").hasAnyRole("NURSE", "DOCTOR");
 	}
 
 }

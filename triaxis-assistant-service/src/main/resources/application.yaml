@@ -20,6 +20,24 @@ spring:
     # This Spring AI auto-configuration ignores spring.ai.model.embedding.text and asks for Gemini credentials
     # even when Gemini is not used; the gemini profile includes it again.
     exclude: org.springframework.ai.model.google.genai.autoconfigure.embedding.GoogleGenAiEmbeddingConnectionAutoConfiguration
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      # The urgency view has its own consumer group; offsets are committed only after Redis applied the event.
+      group-id: assistant-urgency-view
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      max-poll-records: 50
+    listener:
+      # Continues the trace of the request that caused the event (traceparent header).
+      observation-enabled: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2s
   ai:
     model:
       # Spring AI auto-configuration of Gemini is off; the gemini profile turns it on (ADR 0008).
@@ -57,7 +75,7 @@ management:
         enabled: true
       group:
         readiness:
-          include: readinessState,r2dbc
+          include: readinessState,r2dbc,redis
   metrics:
     tags:
       application: ${spring.application.name}
@@ -94,6 +112,11 @@ assistant:
     # 0.60, the closest section to the diabetes question at 0.82 (ASSUMPTIONS A36).
     max-distance: 0.70
     question-max-length: 1000
+  urgency:
+    # A discharged patient is remembered longer than the topic keeps events (7 days), see ADR 0021.
+    discharged-ttl: P30D
+    redis-timeout: PT2S
+    max-in-flight: 64
   corpus:
     location: classpath:/protocols/
     retry:
