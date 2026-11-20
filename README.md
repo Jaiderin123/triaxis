@@ -46,6 +46,20 @@ Patients who exceed the SLA of their level are escalated automatically: every 30
 ./gradlew :triaxis-triage-service:bootRun --args='--spring.profiles.active=local --triage.sla.minutes.CRITICAL=1 --triage.escalation.interval=PT5S'
 ```
 
+### Alerts
+
+When a patient is escalated, the medical team gets one alert (RF-06, ADR 0011). A listener in its own Kafka group reads `paciente_escalado` and sends the minimum: the level, the minutes waited, the SLA and the path `/triage/pacientes/{id}`, without name, vital signs or complaint. An event is alerted at most once, and a patient who is already in consultation or discharged when the event is handled is not alerted (ADR 0023). A failing channel is tried 3 times and never affects the escalation.
+
+- **Log channel (default):** one `WARN` line of the logger `dev.triaxis.triage.alerts`.
+- **Webhook channel:** a JSON POST with a `text` field (shown by Slack and Teams incoming webhooks) and the structured fields. The URL is a secret and comes only from the environment (verified with a local receiver):
+
+```bash
+ALERT_WEBHOOK_URL=http://127.0.0.1:9099/hook ./gradlew :triaxis-triage-service:bootRun \
+  --args='--spring.profiles.active=local --triage.alerts.channel=webhook --triage.sla.minutes.CRITICAL=1 --triage.escalation.interval=PT5S'
+```
+
+The metric `triage_alerts_total` counts the outcomes (`sent`, `failed`, `skipped`, `duplicate`).
+
 ### Errors
 
 Every error of every service has the same shape (RFC 7807): `type`, `title`, `status`, `detail`, `instance`, `traceId` and `timestamp`. Validation errors add `errores`, a list of `campo` and `mensaje`.
@@ -84,7 +98,7 @@ curl -s -X POST localhost:8082/asistente/consulta -H "Authorization: Bearer $TOK
 
 Security is deny-by-default: every route has an explicit role rule, so a path without one answers 401 without a token and 403 with one. Tokens are RS256 JWTs from the auth service and must carry `iss`, `aud` and `exp`.
 
-More endpoints (alerts) are added in later phases. Assumptions and ambiguities of the specification are in [docs/ASSUMPTIONS.md](docs/ASSUMPTIONS.md).
+The alerts add no endpoint: they are sent from Kafka events. Assumptions and ambiguities of the specification are in [docs/ASSUMPTIONS.md](docs/ASSUMPTIONS.md).
 
 ## Decisions
 

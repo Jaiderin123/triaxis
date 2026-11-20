@@ -15,8 +15,8 @@ Working checklist. Follow the phases in order; tick boxes as work lands. Source 
 | 5 Assistant | done | `phase-5-assistant` |
 | Review fixes of 2026-11-19 (between phases 5 and 6) | done | `review-2026-11-19` |
 | 6 Operation report | done | `phase-6-report` |
-| 7 Alerts | next (planned) | |
-| 8 Deployment | pending | |
+| 7 Alerts | done | `phase-7-alerts` |
+| 8 Deployment | next | |
 | 9 Docs | pending | |
 
 ### Definition of done for phases 6 to 9 (engineering rules of the review of 2026-11-19)
@@ -33,15 +33,12 @@ Every pull request of phases 6 to 9 checks, in addition to the build and `script
 - [ ] Read models and markers use keys of their own; the replica assumptions of a background process are stated.
 - [ ] A fresh clone of the branch compiles.
 
-### Where to resume (phase 7)
+### Where to resume (phase 8)
 
-State on 2026-11-20: phases 0 to 6 and the review fixes are released to `main` (tags up to `phase-6-report`); `main` and `develop` have the same content and are protected (pull request required, no direct or force pushes). Phase 7 is **planned and not started**: next step is to create `feat/phase-7-alerts` from `develop` and begin with the tests of the domain and application (first task of the Phase 7 section). After phase 7: phase 8 (deployment, with the tasks moved there by the review) and phase 9 (docs). The accepted debt is in "Improvements" at the end of this file.
+State on 2026-11-20: phases 0 to 7 and the review fixes are released to `main` (tags up to `phase-7-alerts`); `main` and `develop` have the same content and are protected (pull request required, no direct or force pushes). Next is phase 8, the deployment, which also holds the tasks moved there by the review (the rate limit behind the Ingress, the database roles and the DDL out of the startup, the ports and tags of the compose file, `replicas: 1` for the assistant, `auth.users` from a Secret). It is not planned yet: plan it first and record the approved decisions in its section before writing code. After it, phase 9 (docs). The accepted debt is in "Improvements" at the end of this file.
 
-Phase 6 is released to `main` (tag `phase-6-report`). Next is phase 7, the alerts to the medical team (RF-06, an open requirement):
-
-- The phase is planned: the approved decisions are in the Phase 7 section below (ADR 0011, A44, A45). Start with `feat/phase-7-alerts` from `develop`; the design is in `ARCHITECTURE.md` section 6.8.
-- The listener follows the rules learned in phase 5: asynchronous with acknowledgment after success, invalid records skipped and counted, bounded retries, a timeout on the webhook call, and the payload never logged.
-- Conventions: the definition of done of phases 6 to 9 above; the route rule test; UTC sessions; no secrets in the repository; check that a fresh clone compiles.
+- Phase 7 left a real alert channel to configure per environment: `triage.alerts.channel: webhook` and `ALERT_WEBHOOK_URL` from a Secret, or the default log channel (ADR 0011).
+- Conventions: the definition of done of phases 6 to 9 above; the route rule test; UTC sessions; no secrets in the repository; check that a fresh clone compiles. BlockHound is installed when the test JVM of triage and of the assistant starts (`BlockHoundSessionListener`), never inside a test.
 - Documentation sync: follow the checklist in `CLAUDE.md` and run `scripts/check-docs.sh` before each pull request.
 
 ## Cut list and priorities
@@ -268,20 +265,21 @@ First commit: `feat(triage): add hourly operation report with window functions`
 
 **Goal:** the medical team is alerted when a patient is escalated.
 
-Decisions (approved, not started yet; ADR 0011, A44, A45):
+Decisions (approved; ADR 0011, ADR 0023, A44, A45, A46):
 - One branch `feat/phase-7-alerts` from `develop`, one pull request, then the release to `main` and the tag `phase-7-alerts`.
 - Channels: `LoggingAlertNotifier` (default) and `WebhookAlertNotifier` (`ALERT_WEBHOOK_URL`, JSON with `text` for Slack and Teams plus the structured fields), selected with `triage.alerts.channel`.
 - Content: the minimum, without name, vital signs or complaint (A44).
 - Duplicates: a table `alert_deliveries` with the event id as the key; an event already handled is not sent again (A45).
-- Failures: 3 attempts (1 s, 2 s, 4 s), then counted as failed and the next event goes on (A45).
+- Failures: 3 attempts in total (waits of 1 s and then 2 s between them), then counted as failed and the next event goes on (A45).
+- Old and late events: the group starts at the oldest retained event (`earliest`), and a patient that no longer waits is not alerted (`skipped`, ADR 0023, A46). Approved after the manual check showed a new group replaying the alerts of attended patients.
 - An asynchronous listener in its own group `triage-escalation-alerts`, acknowledged after handling; other event types acknowledged at once; invalid records skipped and counted; a timeout on the webhook call; the payload never logged; metric `triage.alerts` by outcome.
 
 Tasks
-- [ ] Domain and application: the alert (built from the escalation event and the registration time), the `AlertNotifier` and `AlertDeliveryStore` ports, `NotifyEscalationUseCase` (duplicate check, bounded retries, record of the outcome); unit tests first
-- [ ] Persistence: `alert_deliveries` in the idempotent schema and its R2DBC adapter
-- [ ] Adapters: `LoggingAlertNotifier` and `WebhookAlertNotifier` (`WebClient` with timeouts), selected by `triage.alerts.channel`; settings validated and documented in `ARCHITECTURE.md` section 10
-- [ ] Kafka listener in the group `triage-escalation-alerts` (consumer settings of triage)
-- [ ] Documentation and a manual check with the compose infrastructure and a local webhook receiver
+- [x] Domain and application: the alert (built from the escalation event and the registration time), the `AlertNotifier` and `AlertDeliveryStore` ports, `NotifyEscalationUseCase` (duplicate check, bounded retries, record of the outcome); unit tests first
+- [x] Persistence: `alert_deliveries` in the idempotent schema and its R2DBC adapter
+- [x] Adapters: `LoggingAlertNotifier` and `WebhookAlertNotifier` (`WebClient` with timeouts), selected by `triage.alerts.channel`; settings validated and documented in `ARCHITECTURE.md` section 10
+- [x] Kafka listener in the group `triage-escalation-alerts` (consumer settings of triage)
+- [x] Documentation and a manual check with the compose infrastructure and a local webhook receiver
 
 Tests that must exist:
 - An escalated event gives exactly one notification with the minimal content and no name.
@@ -293,6 +291,7 @@ Tests that must exist:
 - Other event types and invalid records do not notify.
 - An end-to-end path from a real escalation through the outbox and Kafka to the fake webhook.
 - The flow under BlockHound, and the escalation is unaffected when the channel fails.
+- A patient that entered consultation before the event was handled is `skipped` and gets no alert (ADR 0023).
 
 Definition of done: `./gradlew build` and `scripts/check-docs.sh` pass, a fresh clone compiles, the checklist of phases 6 to 9 is met, and a manual check shows an alert in the log and at a local webhook after a real escalation.
 
@@ -527,6 +526,28 @@ One entry per finished piece of work: what was done, decisions taken, how it was
   - The report runs under BlockHound.
   - Manual check with the compose database, auth and triage: three registrations, one consultation and one direct discharge gave the expected hour, levels and wait (only the patient who entered consultation), a nurse got 403 and a date-time without a zone got 400 on `hasta`.
 - **Not verified yet:** the report on a large dataset (the query uses the new index; `EXPLAIN` was not run).
+
+---
+
+### Phase 7: Alerts (done)
+
+- **What:**
+  - Domain: `EscalationAlert` (the minimum of A44, minutes waited from the registration to the escalation, rounded down), `AlertOutcome` (`SENT`, `FAILED`, `SKIPPED`, `DUPLICATE`) and `AlertDelivery`.
+  - Application: `NotifyEscalationUseCase` / `NotifyEscalationService`. An event already recorded is a duplicate; a patient that no longer waits is skipped; otherwise up to 3 attempts in total with waits of 1 s and 2 s, then `FAILED`. The outcome is recorded after the send, and a database error is an error (the event is handled again). Ports `AlertNotifier` and `AlertDeliveryStore`, and `TriageMetrics.alertHandled`.
+  - Persistence: table `alert_deliveries` (event id as the primary key, first record wins, no reference to patients; the check constraint is replaced idempotently) and `R2dbcAlertDeliveryStore`.
+  - Adapters: `LoggingAlertNotifier` (default; one WARN line with the text and `alert.*` key-value pairs in the ECS JSON) and `WebhookAlertNotifier` (JSON with `text` and the Spanish fields; connect 2 s and response 5 s timeouts plus an overall bound; errors replaced by a cause without the URL or the body), selected by `triage.alerts.channel`; `AlertProperties` validated, with the URL hidden from `toString`.
+  - Listener: `EscalationAlertListener` in the group `triage-escalation-alerts` (`earliest`), asynchronous with acknowledgment after handling, other types acknowledged at once, invalid records skipped and counted in `triage.alerts.invalid`, at most 16 events in flight, a timeout per event derived from the settings, and retries with back-off for database errors. `EventContractMapper.toDomain` maps the contract back to the domain event. Consumer settings of triage in `application.yaml`.
+  - Tests: BlockHound is now installed when the test JVM of triage starts (`BlockHoundSessionListener`, as in the assistant); installing it in a `@BeforeAll` broke the scheduler of Reactor once several contexts were running.
+- **Decisions:**
+  - The wording of the retries in ADR 0011, A45 and the plan was fixed to "3 attempts in total, waits of 1 s and 2 s" (the specification says nothing about retries; the property and section 10 already said 3 attempts).
+  - ADR 0023 and A46: the group starts at `earliest` and a patient that no longer waits is skipped. It partly supersedes the delivery rules of ADR 0011.
+- **Verified:**
+  - `./gradlew build` passes (triage 306 tests, every one under BlockHound).
+  - Unit tests of the domain and the use case: minimal content, duplicate, two failures then success, permanent failure and the next event still sent, unknown patient, skipped patients, store failure, validation of the settings.
+  - A fake webhook (Reactor Netty) receives the JSON; a 503 and an unreachable webhook give errors without the URL; a slow webhook is cut by the timeout.
+  - With real Kafka and PostgreSQL: one alert per event and a redelivery counted as duplicate; other types and invalid records do not alert. End to end with the webhook channel: a real escalation through the outbox, the relay and Kafka reaches the webhook; a refusing webhook gets 3 attempts, is recorded as `FAILED`, the next patient is still alerted and the escalation and its audit entry stay; a patient in consultation before the event is handled is `SKIPPED`.
+  - Manual check with the compose PostgreSQL and Kafka, auth and triage (critical SLA of 1 minute, escalation every 5 s): the alert appeared in the log with the `log` channel and a local webhook receiver got one JSON POST with the `webhook` channel, without name, vital signs or complaint. The URL never appeared in the logs. After the group offsets were deleted, the replay alerted the 4 patients still waiting and recorded the patient in consultation as `SKIPPED` (`triage_alerts_total{outcome="skipped"} 1`).
+- **Not verified yet:** a real Slack or Teams incoming webhook (the format follows their documented `text` field).
 
 ---
 

@@ -2,22 +2,16 @@ package dev.triaxis.triage;
 
 import java.time.Duration;
 
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import reactor.blockhound.BlockHound;
 import reactor.core.publisher.Mono;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Proves BlockHound is active, so later tests can assert that reactive flows never block.
+ * Proves BlockHound is active (installed when the test JVM starts by {@link BlockHoundSessionListener}), so every
+ * test can rely on reactive flows never blocking.
  */
 class NonBlockingTest {
-
-	@BeforeAll
-	static void installBlockHound() {
-		BlockHound.install();
-	}
 
 	@Test
 	void blockingCallOnNonBlockingThreadIsDetected() {

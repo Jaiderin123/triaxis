@@ -14,11 +14,9 @@ import dev.triaxis.triage.application.port.out.UnitOfWork;
 import dev.triaxis.triage.application.service.EscalateOverduePatientsService;
 import dev.triaxis.triage.domain.model.PatientStatus;
 import dev.triaxis.triage.infrastructure.adapter.out.persistence.PersistenceTestSupport;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.web.reactive.server.WebTestClient;
-import reactor.blockhound.BlockHound;
 import reactor.core.scheduler.Schedulers;
 
 import static dev.triaxis.triage.infrastructure.adapter.in.web.ApiTestSupport.changeStatus;
@@ -29,7 +27,7 @@ import static dev.triaxis.triage.infrastructure.adapter.in.web.ApiTestSupport.re
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * With BlockHound installed, any blocking call on a non-blocking thread fails the request. The flow
+ * BlockHound is installed when the test JVM starts (BlockHoundSessionListener), so any blocking call on a non-blocking thread fails the request. The flow
  * covers registration, status changes, reads and the escalation, so it exercises the web, security,
  * persistence, transaction and outbox code.
  */
@@ -56,11 +54,6 @@ class NonBlockingFlowTest {
 
 	@Autowired
 	TriageMetrics metrics;
-
-	@BeforeAll
-	static void installBlockHound() {
-		BlockHound.install();
-	}
 
 	@Test
 	void registerChangeStatusAndReadDoNotBlockTheEventLoop() {

@@ -6,7 +6,10 @@ import dev.triaxis.triage.application.port.in.ChangePatientStatusUseCase;
 import dev.triaxis.triage.application.port.in.EscalateOverduePatientsUseCase;
 import dev.triaxis.triage.application.port.in.GetOperationReportUseCase;
 import dev.triaxis.triage.application.port.in.GetPatientUseCase;
+import dev.triaxis.triage.application.port.in.NotifyEscalationUseCase;
 import dev.triaxis.triage.application.port.in.RegisterPatientUseCase;
+import dev.triaxis.triage.application.port.out.AlertDeliveryStore;
+import dev.triaxis.triage.application.port.out.AlertNotifier;
 import dev.triaxis.triage.application.port.out.AuditRepository;
 import dev.triaxis.triage.application.port.out.ClockPort;
 import dev.triaxis.triage.application.port.out.EventPublisher;
@@ -19,6 +22,7 @@ import dev.triaxis.triage.application.service.ChangePatientStatusService;
 import dev.triaxis.triage.application.service.EscalateOverduePatientsService;
 import dev.triaxis.triage.application.service.GetOperationReportService;
 import dev.triaxis.triage.application.service.GetPatientService;
+import dev.triaxis.triage.application.service.NotifyEscalationService;
 import dev.triaxis.triage.application.service.RegisterPatientService;
 import dev.triaxis.triage.domain.service.ComplaintPolicy;
 import dev.triaxis.triage.domain.service.SlaPolicy;
@@ -30,7 +34,8 @@ import org.springframework.context.annotation.Configuration;
 
 /** Wires the framework-free domain and application classes. */
 @Configuration
-@EnableConfigurationProperties({TriageProperties.class, EscalationProperties.class, ReportProperties.class})
+@EnableConfigurationProperties({TriageProperties.class, EscalationProperties.class, ReportProperties.class,
+		AlertProperties.class})
 class TriageConfiguration {
 
 	@Bean
@@ -83,6 +88,13 @@ class TriageConfiguration {
 	@Bean
 	GetPatientUseCase getPatientUseCase(PatientRepository patients) {
 		return new GetPatientService(patients);
+	}
+
+	@Bean
+	NotifyEscalationUseCase notifyEscalationUseCase(PatientRepository patients, AlertDeliveryStore deliveries,
+			AlertNotifier notifier, ClockPort clock, TriageMetrics metrics, AlertProperties properties) {
+		return new NotifyEscalationService(patients, deliveries, notifier, clock, metrics, properties.attempts(),
+				properties.backoff());
 	}
 
 }

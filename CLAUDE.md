@@ -11,7 +11,7 @@ Triaxis is a reactive digital triage system with a clinical assistant. Nurses re
 | Phased checklist (what to do next) | `docs/PLAN.md` |
 | Assumptions and ambiguities | `docs/ASSUMPTIONS.md` |
 | Git and commit conventions | `docs/GIT_WORKFLOW.md` |
-| Decision records | `docs/adr/` (README, template and ADRs 0001 to 0009 and 0011 to 0022 exist; the status of the rest is in `ARCHITECTURE.md` section 14) |
+| Decision records | `docs/adr/` (README, template and ADRs 0001 to 0009 and 0011 to 0023 exist; the status of the rest is in `ARCHITECTURE.md` section 14) |
 | Original requirements (RF-xx, RN-xx), Spanish | `docs/private/ASSIGNMENT.md` (local only, git-ignored) |
 
 ## Modules
@@ -25,7 +25,7 @@ Triaxis is a reactive digital triage system with a clinical assistant. Nurses re
 | `triaxis-security` | n/a | Library: shared resource-server (JWT) configuration |
 | `triaxis-web` | n/a | Library: standard error responses, access log, protected metrics, tracing (no business logic) |
 
-All six modules exist on Spring Boot 3.5.16 and `./gradlew build` passes. Done and released to `main`: the auth service and shared security (phase 1), the triage core with the audit (phase 2), the events through a transactional outbox with an ordered relay to Kafka (phase 3), the platform foundation (standard errors, OpenTelemetry, JSON logs, protected metrics, hardening), the SLA escalation (phase 4), the assistant (phase 5: RAG with validated citations, the degraded mode, the urgency view from Kafka in Redis), the fixes of the review of 2026-11-19 (ADR 0022), and the operation report (phase 6: one SQL query with window functions). Next: the alerts to the medical team (phase 7). The status table and the resume notes are in `docs/PLAN.md`.
+All six modules exist on Spring Boot 3.5.16 and `./gradlew build` passes. Done and released to `main`: the auth service and shared security (phase 1), the triage core with the audit (phase 2), the events through a transactional outbox with an ordered relay to Kafka (phase 3), the platform foundation (standard errors, OpenTelemetry, JSON logs, protected metrics, hardening), the SLA escalation (phase 4), the assistant (phase 5: RAG with validated citations, the degraded mode, the urgency view from Kafka in Redis), the fixes of the review of 2026-11-19 (ADR 0022), the operation report (phase 6: one SQL query with window functions), and the alerts to the medical team (phase 7: a Kafka listener with a log or webhook channel, ADR 0011 and 0023). Next: the deployment (phase 8). The status table and the resume notes are in `docs/PLAN.md`.
 
 ## Package layout (hexagonal, per service)
 
@@ -61,13 +61,16 @@ Correctness
 - Escalation is one atomic `UPDATE ... RETURNING` with `FOR UPDATE SKIP LOCKED` (ADR 0006); a patient is escalated at most once and never from `EN_CONSULTA` or `ALTA`. The escalation loop is off in tests (`triage.escalation.enabled=false`); they call the use case with a fixed clock and back-dated patients.
 - Patient row, audit entry and outbox row are written in one transaction (done, ADR 0005). The relay delivers the outbox to Kafka in order; the relay loop is off in tests and they call `relayOnce()`.
 - The audit table is append-only and records the actor (JWT `sub`, or `system`). There is no delete endpoint.
+- Alerts (ADR 0011, 0023): one per escalation event (`alert_deliveries`, event id as the key), only while the patient still waits, sent from the Kafka listener and never from the escalation transaction. The webhook URL is a secret and the alert carries no name, vital signs or complaint.
 - Validation of business data lives in the domain; the web layer only checks JSON shape. Boundary mappers use MapStruct and only copy data.
 
 Assistant
 - When retrieval finds no relevant excerpt, answer with the fixed notice and do **not** call the LLM.
 - Sources in the response come from corpus metadata for validated ids, never from model free text. An invalid or unretrieved citation replaces the answer with the fixed notice.
 - Circuit breaker, timeout and fallback HTTP 503 on LLM calls (`ResilientLlmAdapter`, ADR 0004). The `mock` provider is the default; Gemini needs the `gemini` profile.
-- BlockHound is installed when the assistant test JVM starts (`BlockHoundSessionListener`); never install it inside a test there.
+
+Tests
+- BlockHound is installed when the test JVM of the assistant and of triage starts (`BlockHoundSessionListener`); never install it inside a test (it breaks the Reactor scheduler once other contexts run).
 
 Isolation
 - Triage never depends on the assistant. The urgency view is built only from Kafka events, never by calling the triage API.
