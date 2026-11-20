@@ -11,20 +11,21 @@ Working checklist. Follow the phases in order; tick boxes as work lands. Source 
 | 2 Triage core | done | `phase-2-triage-core` |
 | 3 Events (outbox) | done | `phase-3-events` |
 | Platform foundation (errors, observability, hardening) | done | `platform-foundation` |
-| 4 Escalation | done (release to `main` pending) | |
-| 5 Assistant | done (release to `main` pending) | |
-| 6 Operation report | pending | |
+| 4 Escalation | done | `phase-4-escalation` |
+| 5 Assistant | done | `phase-5-assistant` |
+| 6 Operation report | next | |
 | 7 Alerts | pending | |
 | 8 Deployment | pending | |
 | 9 Docs | pending | |
 
-### Where to resume (release of phases 4 and 5, then phase 6)
+### Where to resume (phase 6)
 
-Phases 4 and 5 are merged into `develop`. Pending, in this order:
+Phases 4 and 5 are released to `main` (tags `phase-4-escalation` and `phase-5-assistant`). Next is phase 6, the operation report (RF-05):
 
-1. Release to `main`: a pull request from `develop` into `main` merged with a merge commit, then the tags `phase-4-escalation` and `phase-5-assistant` (the user decides when).
-2. Phase 6 (operation report, RF-05): plan it and record the approved decisions in its section before writing code; the SQL is in `ARCHITECTURE.md` section 6.7.
-3. Conventions that now apply to every service: a source package named `out` is tracked (the ignore rule only covers `/out/` and `/*/out/`); check a fresh clone compiles before a release; in the assistant, BlockHound is installed when the test JVM starts.
+- Plan it first and record the approved decisions in the Phase 6 section before writing code (CLAUDE.md, documentation sync item 7). The SQL is in `ARCHITECTURE.md` section 6.7; the assumptions A7 (discharged directly, no waiting time), A8 (hours without patients) and A12 (UTC buckets) apply.
+- One branch from `develop` and one pull request, rebase and merge; then the release pull request to `main` (merge commit) and the tag.
+- Conventions that now apply to every service: a source package named `out` is tracked (the ignore rule only covers `/out/` and `/*/out/`); check that a fresh clone compiles before each pull request; in the assistant, BlockHound is installed when the test JVM starts; errors through the shared base handler and writer; a new endpoint gets its role rule; no secrets in the repository.
+- Documentation sync: follow the checklist in `CLAUDE.md` and run `scripts/check-docs.sh` before each pull request.
 
 ## Cut list and priorities
 
