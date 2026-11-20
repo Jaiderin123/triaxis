@@ -3,6 +3,8 @@
 # The host name is set once, in the settings below, and copied into the Ingress.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+# Resources added here (the ACME volume) get the namespace of the base too.
+namespace: triaxis
 resources:
   - ../../base
   - acme-volume.yaml
@@ -70,6 +72,25 @@ patches:
           name: acme
           persistentVolumeClaim:
             claimName: traefik-acme
+      # The fsGroup of the pod makes acme.json group-readable on every mount (660), and Traefik then skips the
+      # resolver ("permissions 660 are too open"). Reset it to 600 before Traefik starts.
+      - op: add
+        path: /spec/template/spec/initContainers
+        value:
+          - name: acme-permissions
+            image: traefik:v3.7.19
+            command: ["sh", "-c", "if [ -f /acme/acme.json ]; then chmod 600 /acme/acme.json; fi"]
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: ["ALL"]
+            resources:
+              requests: {cpu: 10m, memory: 16Mi}
+              limits: {memory: 32Mi}
+            volumeMounts:
+              - name: acme
+                mountPath: /acme
   - target: {kind: Ingress, name: triaxis}
     patch: |-
       - op: add
