@@ -99,10 +99,24 @@ class RedisUrgencyViewStoreTest {
 		assertThat(view.updatedAt()).isEqualTo(T0.plusSeconds(50));
 	}
 
+	/** A lost Redis that receives an event again must still look unbuilt, so the next start rebuilds it. */
+	@Test
+	void applyingAnEventDoesNotMarkALostViewAsBuilt() {
+		java.util.List<String> keys = redis.scan().collectList().block();
+		if (!keys.isEmpty()) {
+			redis.delete(keys.toArray(String[]::new)).block();
+		}
+
+		apply(event(UUID.randomUUID(), TriageLevel.URGENT, Kind.PRESENT, 0));
+
+		assertThat(redis.hasKey(RedisUrgencyViewStore.META).block()).isTrue();
+		assertThat(store.isInitialized().block()).isFalse();
+	}
+
 	@Test
 	void aResetEmptiesTheViewAndMarksItInitialized() {
 		apply(event(UUID.randomUUID(), TriageLevel.CRITICAL, Kind.PRESENT, 0));
-		redis.delete(RedisUrgencyViewStore.META).block();
+		redis.delete(RedisUrgencyViewStore.INITIALIZED).block();
 		assertThat(store.isInitialized().block()).isFalse();
 
 		store.reset().block();

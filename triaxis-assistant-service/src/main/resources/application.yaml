@@ -129,6 +129,12 @@ assistant:
     discharged-ttl: P30D
     redis-timeout: PT2S
     max-in-flight: 64
+    reset-timeout: PT30S
+    startup-check:
+      # When Redis does not answer at partition assignment: retries, then a restart of the listener later.
+      attempts: 5
+      backoff: PT2S
+      restart-delay: PT30S
   corpus:
     location: classpath:/protocols/
     retry:

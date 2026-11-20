@@ -6,6 +6,7 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 
+import dev.triaxis.assistant.application.port.out.ClockPort;
 import dev.triaxis.assistant.application.port.out.UrgencyViewStore;
 import dev.triaxis.assistant.domain.model.TriageLevel;
 import dev.triaxis.assistant.domain.model.UrgencyEvent;
@@ -29,16 +30,26 @@ class RedisUrgencyViewStore implements UrgencyViewStore {
 	static final String PATIENT_PREFIX = "urgency:patient:";
 	static final String COUNTERS = "urgency:counters";
 	static final String META = "urgency:meta";
+	/**
+	 * Written only by {@link #reset()}, after the view was emptied for a replay. It is a key of its own: the Lua
+	 * script writes {@code urgency:meta} with every event, so that key cannot tell a built view from a lost one.
+	 */
+	static final String INITIALIZED = "urgency:initialized";
 
 	private final RedisScript<Long> apply;
 	private final ReactiveStringRedisTemplate redis;
+	private final ClockPort clock;
+	private final Duration resetTimeout;
 	private final Duration dischargedTtl;
 	private final Duration timeout;
 
-	RedisUrgencyViewStore(ReactiveStringRedisTemplate redis,
+	RedisUrgencyViewStore(ReactiveStringRedisTemplate redis, ClockPort clock,
 			@Value("${assistant.urgency.discharged-ttl:P30D}") Duration dischargedTtl,
-			@Value("${assistant.urgency.redis-timeout:PT2S}") Duration timeout) {
+			@Value("${assistant.urgency.redis-timeout:PT2S}") Duration timeout,
+			@Value("${assistant.urgency.reset-timeout:PT30S}") Duration resetTimeout) {
 		this.redis = redis;
+		this.clock = clock;
+		this.resetTimeout = resetTimeout;
 		// Read once at startup: a script built from a resource reads the file again, on a Redis I/O thread, the
 		// first time Redis does not know it (BlockHound caught it).
 		this.apply = RedisScript.of(readScript("redis/urgency-apply.lua"), Long.class);
@@ -68,7 +79,7 @@ class RedisUrgencyViewStore implements UrgencyViewStore {
 
 	@Override
 	public Mono<Boolean> isInitialized() {
-		return redis.hasKey(META).timeout(timeout);
+		return redis.hasKey(INITIALIZED).timeout(timeout);
 	}
 
 	@Override
@@ -76,11 +87,10 @@ class RedisUrgencyViewStore implements UrgencyViewStore {
 		return redis.scan(ScanOptions.scanOptions().match(PATIENT_PREFIX + "*").count(500).build())
 				.buffer(500)
 				.concatMap(batch -> redis.delete(batch.toArray(String[]::new)))
-				.then(redis.delete(COUNTERS, META))
-				.then(redis.<String, String>opsForHash().put(META, "initializedAt",
-						String.valueOf(Instant.now().toEpochMilli())))
+				.then(redis.delete(COUNTERS, META, INITIALIZED))
+				.then(redis.opsForValue().set(INITIALIZED, String.valueOf(clock.now().toEpochMilli())))
 				.then()
-				.timeout(Duration.ofSeconds(30));
+				.timeout(resetTimeout);
 	}
 
 	private static String readScript(String path) {
