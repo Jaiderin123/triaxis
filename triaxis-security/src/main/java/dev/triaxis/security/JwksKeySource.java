@@ -14,16 +14,23 @@ import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jwt.SignedJWT;
 import io.netty.channel.ChannelOption;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
+import org.springframework.security.oauth2.jwt.JwtException;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.netty.http.client.HttpClient;
 
 /**
- * Signing keys from the JWKS endpoint, downloaded on first use with explicit connect and response timeouts. The
- * key set is cached. A token whose key id is not in the cache triggers a new download (the keys may have been
- * rotated) at most once per {@code refreshCooldown}; in between, such a token simply finds no key and is rejected.
- * A failed download is not cached, so the next request tries again within the same limits.
+ * Signing keys from the JWKS endpoint, downloaded on first use with explicit connect and response timeouts.
+ *
+ * <ul>
+ * <li>The last key set that was downloaded successfully is kept and always used; a download only replaces it
+ * when it succeeds, so an auth service that is down never invalidates keys that are already known.</li>
+ * <li>A token whose key id is not known triggers a new download (the keys may have been rotated) at most once
+ * per {@code refreshCooldown}; in between, such a token finds no key and is rejected.</li>
+ * <li>Concurrent requests share one download in flight. Until a first download succeeds, every request may
+ * start one, each bounded by the timeouts.</li>
+ * </ul>
  */
 final class JwksKeySource implements Function<SignedJWT, Flux<JWK>> {
 
@@ -31,8 +38,9 @@ final class JwksKeySource implements Function<SignedJWT, Flux<JWK>> {
 	private final String uri;
 	private final JwksSettings settings;
 	private final Clock clock;
-	private Mono<JWKSet> keys;
-	private Instant lastDownload = Instant.MIN;
+	private volatile JWKSet lastGood;
+	private Mono<JWKSet> inFlight;
+	private Instant lastRefresh = Instant.MIN;
 
 	JwksKeySource(String uri, JwksSettings settings, Clock clock) {
 		HttpClient http = HttpClient.create()
@@ -47,44 +55,42 @@ final class JwksKeySource implements Function<SignedJWT, Flux<JWK>> {
 	@Override
 	public Flux<JWK> apply(SignedJWT token) {
 		JWKSelector selector = new JWKSelector(JWKMatcher.forJWSHeader(token.getHeader()));
-		return current().flatMapMany(set -> {
-			List<JWK> found = selector.select(set);
-			return found.isEmpty() ? refreshIfAllowed().flatMapIterable(selector::select) : Flux.fromIterable(found);
-		});
-	}
-
-	private synchronized Mono<JWKSet> current() {
-		if (keys == null) {
-			keys = download();
+		JWKSet known = lastGood;
+		if (known == null) {
+			return download().flatMapIterable(selector::select);
 		}
-		return keys;
+		List<JWK> found = selector.select(known);
+		return found.isEmpty() ? refreshIfAllowed().flatMapIterable(selector::select) : Flux.fromIterable(found);
 	}
 
-	/** A new download for an unknown key id, unless one happened less than {@code refreshCooldown} ago. */
+	/** A new download for an unknown key id, unless one was started less than {@code refreshCooldown} ago. */
 	private synchronized Mono<JWKSet> refreshIfAllowed() {
 		Instant now = clock.instant();
-		if (Duration.between(lastDownload, now).compareTo(settings.refreshCooldown()) < 0) {
+		if (Duration.between(lastRefresh, now).compareTo(settings.refreshCooldown()) < 0) {
 			return Mono.empty();
 		}
-		keys = download();
-		return keys;
+		lastRefresh = now;
+		// A failed refresh falls back to the keys already known.
+		return download().onErrorResume(error -> lastGood == null ? Mono.error(error) : Mono.just(lastGood));
 	}
 
+	/** One download at a time; the result replaces the known keys only when it succeeds. */
 	private synchronized Mono<JWKSet> download() {
-		lastDownload = clock.instant();
-		Mono<JWKSet> fetch = web.get().uri(uri).retrieve().bodyToMono(String.class)
-				// Second limit on the whole exchange, in case the response trickles in.
-				.timeout(settings.connectTimeout().plus(settings.responseTimeout()))
-				.map(JwksKeySource::parse);
-		Mono<JWKSet> cached = fetch.cache(set -> Duration.ofMillis(Long.MAX_VALUE), error -> Duration.ZERO,
-				() -> Duration.ZERO);
-		return cached.doOnError(error -> forget(cached));
+		if (inFlight == null) {
+			Mono<JWKSet> fetch = web.get().uri(uri).retrieve().bodyToMono(String.class)
+					// Second limit on the whole exchange, in case the response trickles in.
+					.timeout(settings.connectTimeout().plus(settings.responseTimeout()))
+					.map(JwksKeySource::parse)
+					.doOnNext(set -> lastGood = set)
+					.doFinally(signal -> finished())
+					.cache();
+			inFlight = fetch;
+		}
+		return inFlight;
 	}
 
-	private synchronized void forget(Mono<JWKSet> failed) {
-		if (keys == failed) {
-			keys = null;
-		}
+	private synchronized void finished() {
+		inFlight = null;
 	}
 
 	private static JWKSet parse(String body) {
@@ -92,7 +98,7 @@ final class JwksKeySource implements Function<SignedJWT, Flux<JWK>> {
 			return JWKSet.parse(body);
 		}
 		catch (ParseException e) {
-			throw new IllegalStateException("The JWKS answer is not a valid key set", e);
+			throw new JwtException("The JWKS answer is not a valid key set", e);
 		}
 	}
 

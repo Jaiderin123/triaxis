@@ -44,6 +44,7 @@ class JwksDecoderTest {
 	private HttpServer server;
 	private final AtomicInteger downloads = new AtomicInteger();
 	private final AtomicLong delayMillis = new AtomicLong();
+	private volatile boolean failing;
 	private volatile String kid = "key-1";
 
 	@BeforeAll
@@ -58,6 +59,11 @@ class JwksDecoderTest {
 		server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
 		server.createContext("/jwks", exchange -> {
 			downloads.incrementAndGet();
+			if (failing) {
+				exchange.sendResponseHeaders(503, -1);
+				exchange.close();
+				return;
+			}
 			try {
 				Thread.sleep(delayMillis.get());
 			}
@@ -157,6 +163,33 @@ class JwksDecoderTest {
 
 		StepVerifier.create(decoder.decode(token("key-2"))).expectNextCount(1).verifyComplete();
 		assertThat(downloads).hasValue(2);
+	}
+
+	/** An unknown key id while auth is down must not invalidate the keys already known. */
+	@Test
+	void aFailedRefreshKeepsTheKnownKeys() throws Exception {
+		ReactiveJwtDecoder decoder = decoder(uri(), Duration.ofSeconds(2), Duration.ZERO);
+		StepVerifier.create(decoder.decode(token("key-1"))).expectNextCount(1).verifyComplete();
+
+		failing = true;
+		StepVerifier.create(decoder.decode(token("unknown-key"))).expectError().verify();
+		int downloadsAfterTheFailedRefresh = downloads.get();
+
+		for (int i = 0; i < 5; i++) {
+			StepVerifier.create(decoder.decode(token("key-1"))).expectNextCount(1).verifyComplete();
+		}
+		assertThat(downloads.get()).as("valid tokens use the known keys").isEqualTo(downloadsAfterTheFailedRefresh);
+	}
+
+	@Test
+	void concurrentRequestsShareOneDownload() throws Exception {
+		delayMillis.set(300);
+		ReactiveJwtDecoder decoder = decoder(uri(), Duration.ofSeconds(2), Duration.ofSeconds(30));
+		String token = token("key-1");
+
+		reactor.core.publisher.Flux.range(0, 8).flatMap(i -> decoder.decode(token)).collectList().block();
+
+		assertThat(downloads).hasValue(1);
 	}
 
 	@Test
