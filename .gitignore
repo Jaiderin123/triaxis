@@ -21,6 +21,10 @@ hs_err_pid*
 .env
 .env.*
 !.env.example
+*.pem
+*.key
+*.p12
+*.jks
 
 # IntelliJ IDEA
 .idea/

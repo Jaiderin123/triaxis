@@ -8,4 +8,10 @@ public record User(String username, String passwordHash, Set<Role> roles) {
 		roles = Set.copyOf(roles);
 	}
 
+	/** Never prints the password hash. */
+	@Override
+	public String toString() {
+		return "User[username=" + username + ", passwordHash=***, roles=" + roles + "]";
+	}
+
 }
