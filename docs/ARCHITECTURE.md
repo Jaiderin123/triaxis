@@ -333,7 +333,7 @@ Every state change writes **patient row, audit entry and outbox row in one trans
 - Single relay in flight (advisory lock) to preserve per-patient ordering.
 - Producer: `acks=all`, idempotence enabled, key = patient id (ordering per patient within a partition).
 - Delivery is **at least once**; consumers are idempotent.
-- A failed send stops the cycle, to keep the order; there is no dead letter yet, so an event that can never be sent blocks the ones after it (an improvement in `PLAN.md`). Each cycle has a timeout and is rolled back when it expires.
+- A failed send stops the cycle, to keep the order; there is no dead letter yet, so an event that can never be sent blocks the ones after it (an improvement in `PLAN.md`). After its budget (`cycle-budget`, 30 s) a cycle stops between two events and commits what it sent (at least one event); a stuck cycle is cut by `cycle-timeout` (60 s) and rolled back.
 
 Why: publishing to Kafka directly after the database commit can lose the event (or the other way around). The outbox removes that dual-write problem.
 
@@ -630,9 +630,9 @@ Event types: `paciente_registrado`, `paciente_en_consulta`, `paciente_alta`, `pa
 | Property or variable | Used by | Purpose |
 |---|---|---|
 | `triage.sla.minutes.*` | triage | SLA per level |
-| `triage.escalation.enabled`, `triage.escalation.interval`, `triage.escalation.batch-size`, `triage.escalation.batch-timeout` | triage | Escalation loop (defaults `true`, `PT30S`, `100`, `PT20S`) |
+| `triage.escalation.enabled`, `triage.escalation.interval`, `triage.escalation.batch-size`, `triage.escalation.batch-timeout` | triage | Escalation loop (defaults `true`, `PT30S`, `100`, `PT60S`), validated at startup |
 | `triage.administrative-complaints` | triage | Level 5 complaint list |
-| `triage.outbox.relay.*` (including `send-timeout` 15 s and `cycle-timeout` 60 s), `triage.outbox.topic.*` | triage | Relay loop and topic creation |
+| `triage.outbox.relay.*` (including `send-timeout` 15 s, `cycle-budget` 30 s and `cycle-timeout` 60 s, validated so that the timeout exceeds budget plus send), `triage.outbox.topic.*` | triage | Relay loop and topic creation |
 | `TRIAGE_DB_URL`, `TRIAGE_DB_USER`, `TRIAGE_DB_PASSWORD` | triage | PostgreSQL (R2DBC) |
 | `KAFKA_BOOTSTRAP_SERVERS` | triage, assistant | Kafka |
 | `AUTH_JWKS_URI` | triage, assistant | Public keys of the auth service |

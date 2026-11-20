@@ -117,14 +117,17 @@ triage:
     enabled: true
     interval: PT30S
     batch-size: 100
-    batch-timeout: PT20S
+    # A batch of 100 is about 300 statements; 60 s leaves 200 ms per statement before the batch is rolled back.
+    batch-timeout: PT60S
   outbox:
     relay:
       enabled: true
       interval: PT1S
       batch-size: 50
       send-timeout: PT15S
-      # A stuck cycle is cancelled and rolled back, and the loop goes on (its events are sent again).
+      # After the budget a cycle stops between two events and commits what it sent (at least one event).
+      cycle-budget: PT30S
+      # Safety net for a stuck cycle (rolled back, its events sent again); must exceed budget plus send-timeout.
       cycle-timeout: PT60S
     topic:
       partitions: 3

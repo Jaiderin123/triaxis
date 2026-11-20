@@ -89,13 +89,17 @@ public class OutboxRelay {
 	}
 
 	private Mono<Integer> deliverBatch() {
+		long deadline = System.nanoTime() + settings.cycleBudget().toNanos();
+		java.util.concurrent.atomic.AtomicInteger started = new java.util.concurrent.atomic.AtomicInteger();
 		return client.sql(PENDING).bind("batch", settings.batchSize())
 				.map((row, metadata) -> new PendingEvent(row.get("id", Long.class), row.get("message_key", String.class),
 						row.get("event_type", String.class), row.get("correlation_id", String.class),
 						row.get("traceparent", String.class), row.get("payload", String.class)))
 				.all().collectList()
 				.flatMapMany(Flux::fromIterable)
-				.concatMap(this::deliver)
+				// Past the budget, stop between two events and commit what was sent; the first one always goes.
+				.concatMap(event -> started.getAndIncrement() > 0 && System.nanoTime() > deadline ? Mono.just(false)
+						: deliver(event))
 				.takeWhile(Boolean::booleanValue)
 				.count()
 				.map(Long::intValue);
