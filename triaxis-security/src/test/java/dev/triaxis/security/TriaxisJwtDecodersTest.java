@@ -94,6 +94,43 @@ class TriaxisJwtDecodersTest {
 		StepVerifier.create(decoder.decode(parts[0] + "." + forgedPayload + "." + parts[2])).expectError().verify();
 	}
 
+	@Test
+	void rejectsATokenWithoutExpiration() throws Exception {
+		JWTClaimsSet claims = new JWTClaimsSet.Builder().subject("nurse").issuer(ISSUER).audience(AUDIENCE)
+				.issueTime(new Date()).claim("roles", List.of("NURSE")).build();
+		SignedJWT jwt = new SignedJWT(new JWSHeader(JWSAlgorithm.RS256), claims);
+		jwt.sign(new RSASSASigner((RSAPrivateKey) keyPair.getPrivate()));
+
+		StepVerifier.create(decoder.decode(jwt.serialize()))
+				.expectErrorMatches(error -> error instanceof org.springframework.security.oauth2.jwt.JwtValidationException)
+				.verify();
+	}
+
+	@Test
+	void rejectsAnUnsignedToken() {
+		String token = new com.nimbusds.jwt.PlainJWT(validClaims()).serialize();
+
+		StepVerifier.create(decoder.decode(token))
+				.expectError(org.springframework.security.oauth2.jwt.BadJwtException.class)
+				.verify();
+	}
+
+	/** HS256 signed with the public key as the secret: the classic algorithm confusion attack. */
+	@Test
+	void rejectsAnHmacTokenSignedWithThePublicKey() throws Exception {
+		SignedJWT jwt = new SignedJWT(new JWSHeader(JWSAlgorithm.HS256), validClaims());
+		jwt.sign(new com.nimbusds.jose.crypto.MACSigner(keyPair.getPublic().getEncoded()));
+
+		StepVerifier.create(decoder.decode(jwt.serialize()))
+				.expectError(org.springframework.security.oauth2.jwt.JwtException.class)
+				.verify();
+	}
+
+	private static JWTClaimsSet validClaims() {
+		return new JWTClaimsSet.Builder().subject("nurse").issuer(ISSUER).audience(AUDIENCE).issueTime(new Date())
+				.expirationTime(Date.from(Instant.now().plusSeconds(600))).claim("roles", List.of("NURSE")).build();
+	}
+
 	private static String sign(KeyPair pair, String issuer, Instant expiresAt) throws Exception {
 		return sign(pair, issuer, expiresAt, AUDIENCE);
 	}

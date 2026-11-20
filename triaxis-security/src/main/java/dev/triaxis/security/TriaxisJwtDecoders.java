@@ -2,6 +2,8 @@ package dev.triaxis.security;
 
 import java.security.interfaces.RSAPublicKey;
 import java.time.Clock;
+import java.time.Instant;
+import java.util.Objects;
 import java.util.List;
 
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
@@ -10,6 +12,8 @@ import org.springframework.security.oauth2.core.OAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
 import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtClaimNames;
+import org.springframework.security.oauth2.jwt.JwtClaimValidator;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusReactiveJwtDecoder;
 import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
@@ -54,7 +58,11 @@ public final class TriaxisJwtDecoders {
 					: OAuth2TokenValidatorResult.failure(
 							new OAuth2Error("invalid_token", "The token is not meant for this system", null));
 		};
-		return new DelegatingOAuth2TokenValidator<>(JwtValidators.createDefaultWithIssuer(issuer), audienceValidator);
+		// The default timestamp validator only checks exp when it is present; a token without exp is refused.
+		OAuth2TokenValidator<Jwt> expirationRequired = new JwtClaimValidator<Instant>(JwtClaimNames.EXP,
+				Objects::nonNull);
+		return new DelegatingOAuth2TokenValidator<>(JwtValidators.createDefaultWithIssuer(issuer), expirationRequired,
+				audienceValidator);
 	}
 
 }

@@ -119,11 +119,20 @@ class SecurityApiTest {
 		client.get().uri("/nothing-here").exchange().expectStatus().isUnauthorized();
 	}
 
+	/** Deny by default: a route without a rule is refused, so an unknown path does not reveal what exists. */
+	@Test
+	void anUnknownRouteIsDeniedForAnAuthenticatedUserInTheStandardFormat() {
+		client.get().uri("/nothing-here").header(HttpHeaders.AUTHORIZATION, nurse()).exchange()
+				.expectStatus().isForbidden()
+				.expectBody().jsonPath("$.status").isEqualTo(403).jsonPath("$.instance").isEqualTo("/nothing-here");
+	}
+
 	@Test
 	void notFoundForAnAuthenticatedUserUsesTheStandardFormat() {
-		client.get().uri("/nothing-here").header(HttpHeaders.AUTHORIZATION, nurse()).exchange()
+		String path = "/triage/pacientes/" + java.util.UUID.randomUUID();
+		client.get().uri(path).header(HttpHeaders.AUTHORIZATION, nurse()).exchange()
 				.expectStatus().isNotFound()
-				.expectBody().jsonPath("$.status").isEqualTo(404).jsonPath("$.instance").isEqualTo("/nothing-here");
+				.expectBody().jsonPath("$.status").isEqualTo(404).jsonPath("$.instance").isEqualTo(path);
 	}
 
 	@Test

@@ -67,7 +67,9 @@ public class TriaxisSecurityAutoConfiguration {
 				.authorizeExchange(exchanges -> {
 					exchanges.pathMatchers("/actuator/health", "/actuator/health/**").permitAll();
 					customizers.orderedStream().forEach(customizer -> customizer.customize(exchanges));
-					exchanges.anyExchange().authenticated();
+					exchanges.pathMatchers("/actuator/info").authenticated();
+					// Deny by default: a route without an explicit rule is refused, even with a valid token.
+					exchanges.anyExchange().denyAll();
 				})
 				.exceptionHandling(handling -> handling.authenticationEntryPoint(entryPoint).accessDeniedHandler(denied))
 				.oauth2ResourceServer(oauth2 -> oauth2
