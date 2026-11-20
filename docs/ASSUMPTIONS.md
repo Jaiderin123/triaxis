@@ -239,10 +239,16 @@ A1 to A4 come from `ARCHITECTURE.md` section 6.2. A5 onward were added while pre
 - **Why:** a client reads a level directly by its name; `actualizadoEn` shows how fresh the view is.
 - **Impact if wrong:** a different shape is a DTO change.
 
-## A36. Similarity threshold without a Gemini key
+## A36. Similarity threshold per embedding model
 
-- **Ambiguity:** the threshold must be calibrated with the embedding model, and no Gemini key is available during phase 5.
-- **Decision:** phase 5 is built and tested with the `mock` provider, and its threshold is calibrated with the three sample questions. The Gemini adapter is built, configured and covered by tests with fakes, but its threshold is a provisional value until it is calibrated with a real key, together with the choice of the deployed LLM profile (A16, phase 8).
-- **Why:** no key and no cost are needed to finish the phase, and tests never call a real provider anyway.
-- **Impact if wrong:** with a real key and the provisional threshold, a question could be answered or refused wrongly until the calibration is done; the threshold is a property.
+- **Ambiguity:** the threshold must be calibrated with the embedding model, and it is different for each one.
+- **Decision:** one `assistant.rag.max-distance` per provider. `mock` (bag of words): 0.70; the relevant sections of the sample questions are at 0.47 and 0.60 and the closest section to the diabetes question at 0.82. `gemini` (`gemini-embedding-001`, 768 dimensions, task type `SEMANTIC_SIMILARITY`): 0.33, calibrated on 2026-11-19 with ten questions: six covered by the corpus (the two samples plus contraindications, qSOFA criteria and pediatric rehydration) are at most 0.29 from their section; four outside it (diabetes 0.45, myocardial infarction 0.38, paracetamol dose 0.38, asthma attack 0.37) are at least 0.37 away.
+- **Why:** the gate must refuse questions without a protocol before any model call; the value sits in the middle of the gap.
+- **Impact if wrong:** the gap is narrow (0.29 to 0.37), so a question close to the corpus but not covered by it may pass the gate; the prompt rule (`NO_PROTOCOL`) and the citation check still stop an invented answer. A new embedding model needs a new calibration; the threshold is a property.
 
+## A37. Loading the corpus at startup
+
+- **Ambiguity:** the specification asks for RAG over the corpus and a 503 when the LLM is unavailable, but not what happens when the provider is unavailable while the service starts, or when a protocol file is broken.
+- **Decision:** the protocol files are read and validated on the main thread before the service accepts traffic; a malformed or empty corpus stops the startup. The embedding of the sections runs in the background and is retried with back-off (2 seconds up to 1 minute, `assistant.corpus.retry.*`), one section at a time. Until the corpus is stored with the current embedding model, `POST /asistente/consulta` answers 503, never the "no protocol" notice. Readiness does not wait for the embedding.
+- **Why:** a broken corpus is a deployment error and must be seen at once; an unavailable provider is transient and must not take down the urgency view, which does not depend on the LLM. Answering "no protocol" while the corpus is missing would be false.
+- **Impact if wrong:** a deployment with a bad key starts and keeps retrying (visible in the logs and in the 503 answers) instead of failing; making readiness wait for the corpus is a health indicator change.
