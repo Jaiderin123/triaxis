@@ -17,7 +17,7 @@ See [docs/TECH_STACK.md](docs/TECH_STACK.md).
 Requirements: JDK 21 and Docker. The full one-command run (all services in containers) arrives with the deployment phase; today the infrastructure runs in containers and the services run from Gradle.
 
 ```bash
-docker compose up -d postgres           # PostgreSQL (also Kafka and Redis when needed)
+docker compose up -d postgres kafka kafka-init jaeger   # add redis when the assistant needs it
 
 # in two terminals (JAVA_HOME must point to a JDK 21)
 ./gradlew :triaxis-auth-service:bootRun --args='--spring.profiles.active=local'
@@ -34,6 +34,21 @@ curl -s -X POST localhost:8081/triage/pacientes -H "Authorization: Bearer $TOKEN
   -H 'Content-Type: application/json' \
   -d '{"nombreCompleto":"Ana Gomez","edad":54,"frecuenciaCardiaca":130,"presionSistolica":180,"presionDiastolica":110,"spo2":97,"temperatura":36.8,"dolor":8,"gcs":15,"quejaPrincipal":"Dolor torácico"}'
 ```
+
+### Errors
+
+Every error of every service has the same shape (RFC 7807): `type`, `title`, `status`, `detail`, `instance`, `traceId` and `timestamp`. Validation errors add `errores`, a list of `campo` and `mensaje`.
+
+### Observability
+
+- **Logs:** JSON (ECS) on standard output, with `traceId` and `spanId`; the `local` profile prints plain text. One access-log line per request (never bodies or tokens).
+- **Traces:** OpenTelemetry. Start a service with `TRACING_EXPORT_ENABLED=true` and open Jaeger at http://localhost:16686. Send a `traceparent` header to continue an existing trace.
+- **Metrics:** `curl -u metrics:metrics-local localhost:8081/actuator/prometheus` (local profile password; elsewhere `METRICS_USER` and `METRICS_PASSWORD`, otherwise the endpoint is denied).
+- **Health:** `/actuator/health/liveness` and `/actuator/health/readiness`.
+
+### Configuration
+
+Everything is configured through environment variables; nothing secret is in the repository. The table is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) section 10.
 
 ## API overview
 

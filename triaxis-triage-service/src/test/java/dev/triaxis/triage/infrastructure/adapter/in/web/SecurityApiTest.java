@@ -86,9 +86,68 @@ class SecurityApiTest {
 	}
 
 	@Test
-	void otherPathsNeedAValidTokenToo() {
-		client.get().uri("/actuator/prometheus").header(HttpHeaders.AUTHORIZATION, "").exchange()
+	void unauthorizedAnswersUseTheStandardProblemFormat() {
+		client.post().uri("/triage/pacientes").bodyValue(notUrgent()).exchange()
+				.expectStatus().isUnauthorized()
+				.expectHeader().valueEquals("WWW-Authenticate", "Bearer")
+				.expectBody()
+				.jsonPath("$.status").isEqualTo(401)
+				.jsonPath("$.instance").isEqualTo("/triage/pacientes")
+				.jsonPath("$.traceId").isNotEmpty()
+				.jsonPath("$.timestamp").isNotEmpty();
+	}
+
+	@Test
+	void forbiddenAnswersUseTheStandardProblemFormat() {
+		register(client, doctor(), notUrgent()).expectStatus().isForbidden()
+				.expectBody()
+				.jsonPath("$.status").isEqualTo(403)
+				.jsonPath("$.detail").isEqualTo("Access denied")
+				.jsonPath("$.traceId").isNotEmpty();
+	}
+
+	@Test
+	void aTokenForAnotherAudienceIsRejected() throws Exception {
+		String token = TestSecurityConfiguration.tokenForAudience("another-system", "nurse-ana", "NURSE");
+
+		register(client, bearer(token), notUrgent()).expectStatus().isUnauthorized();
+	}
+
+	@Test
+	void unknownPathsNeedAValidTokenToo() {
+		client.get().uri("/actuator/env").exchange().expectStatus().isUnauthorized();
+		client.get().uri("/nothing-here").exchange().expectStatus().isUnauthorized();
+	}
+
+	@Test
+	void notFoundForAnAuthenticatedUserUsesTheStandardFormat() {
+		client.get().uri("/nothing-here").header(HttpHeaders.AUTHORIZATION, nurse()).exchange()
+				.expectStatus().isNotFound()
+				.expectBody().jsonPath("$.status").isEqualTo(404).jsonPath("$.instance").isEqualTo("/nothing-here");
+	}
+
+	@Test
+	void metricsNeedTheScraperCredentials() {
+		client.get().uri("/actuator/prometheus").exchange().expectStatus().isUnauthorized()
+				.expectHeader().valueMatches("WWW-Authenticate", "Basic realm=.*");
+		client.get().uri("/actuator/prometheus").headers(h -> h.setBasicAuth("scraper", "wrong")).exchange()
 				.expectStatus().isUnauthorized();
+		// A valid API token is not accepted either: the scraper has its own credentials.
+		client.get().uri("/actuator/prometheus").header(HttpHeaders.AUTHORIZATION, nurse()).exchange()
+				.expectStatus().isUnauthorized();
+	}
+
+	@Test
+	void metricsExposeTheBusinessCountersToTheScraper() {
+		register(client, nurse(), notUrgent()).expectStatus().isCreated();
+
+		// The metrics text is larger than the 64 KB limit of the services, so the test client reads more.
+		client.mutate().codecs(codecs -> codecs.defaultCodecs().maxInMemorySize(4 * 1024 * 1024)).build()
+				.get().uri("/actuator/prometheus").headers(h -> h.setBasicAuth("scraper", "test-metrics-secret")).exchange()
+				.expectStatus().isOk()
+				.expectBody(String.class).value(body -> org.assertj.core.api.Assertions.assertThat(body)
+						.contains("triage_classification_total").contains("triage_outbox_pending")
+						.contains("application=\"triaxis-triage-service\""));
 	}
 
 }

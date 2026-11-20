@@ -11,7 +11,7 @@ The requirements specification asks for basic authentication on the endpoints (J
 ## Decision
 
 - A separate `triaxis-auth-service` issues JWTs signed with **RS256** and publishes the public key at `GET /.well-known/jwks.json`.
-- Tokens last 15 minutes and carry `sub`, `roles`, `iss`, `iat`, `exp` and `jti`; the header carries a `kid`.
+- Tokens last 15 minutes and carry `sub`, `roles`, `iss`, `aud`, `iat`, `exp` and `jti`; the header carries a `kid`. The audience check and the other hardening measures are in ADR 0020.
 - `triage-service` and `assistant-service` are OAuth2 resource servers configured by the shared module `triaxis-security`. They validate signature, issuer and expiration using the public key, which is fetched lazily from the JWKS endpoint, so they do not need `auth-service` to start.
 - The signing key is read from `JWT_PRIVATE_KEY`. A key pair is generated only when `auth.jwt.generate-key-if-missing=true` (local profile); otherwise the service refuses to start.
 - `auth-service` does **not** depend on `triaxis-security`: it creates tokens and does not validate them.

@@ -2,6 +2,7 @@ package dev.triaxis.auth.infrastructure.adapter.in.web.validation;
 
 import java.util.List;
 
+import dev.triaxis.web.problem.FieldProblem;
 import org.springframework.stereotype.Component;
 import org.springframework.validation.BeanPropertyBindingResult;
 import org.springframework.validation.Validator;
@@ -20,7 +21,9 @@ public class RequestValidator {
 		BeanPropertyBindingResult errors = new BeanPropertyBindingResult(body, body.getClass().getSimpleName());
 		validator.validate(body, errors);
 		if (errors.hasErrors()) {
-			List<String> fields = errors.getFieldErrors().stream().map(e -> e.getField()).distinct().sorted().toList();
+			List<FieldProblem> fields = errors.getFieldErrors().stream()
+					.map(e -> new FieldProblem(e.getField(), e.getDefaultMessage() == null ? "is invalid" : e.getDefaultMessage()))
+					.sorted(java.util.Comparator.comparing(FieldProblem::campo)).toList();
 			throw new RequestValidationException(fields);
 		}
 		return body;

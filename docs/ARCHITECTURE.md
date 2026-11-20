@@ -38,7 +38,7 @@ Backend only. No frontend.
 | RN-04 Clinical audit | `patient_audit` table with the actor, append-only, no delete endpoint (ADR 0014) |
 | RN-05 Anti-hallucination | Retrieval threshold + validated citations (see 7.2) |
 | Resilience4j on the LLM | `assistant-service`: circuit breaker, timeout, 503 fallback |
-| Observability | Actuator probes, Micrometer metrics, structured logs with correlation id |
+| Observability | Actuator probes, Micrometer metrics (protected Prometheus endpoint), ECS JSON logs, OpenTelemetry traces (ADR 0019) |
 | Security | JWT (RS256) from `auth-service`, resource server in the other two |
 
 ---
@@ -97,6 +97,7 @@ Key properties:
 | `triaxis-auth-service` | 8083 | None (in-memory users from configuration) | `/auth/**`, `/.well-known/jwks.json` |
 | `triaxis-common` | n/a | Library: event contract records | n/a |
 | `triaxis-security` | n/a | Library: shared resource-server configuration | n/a |
+| `triaxis-web` | n/a | Library: standard error responses, access log, protected metrics, tracing dependencies (ADR 0018) | n/a |
 
 Path-based routing works behind a single Ingress without rewrites, because each service already owns a distinct base path.
 
@@ -313,7 +314,8 @@ CREATE TABLE outbox_events (
   event_id     UUID NOT NULL UNIQUE,
   message_key  VARCHAR(64) NOT NULL,
   event_type   VARCHAR(32) NOT NULL,
-  correlation_id VARCHAR(64),             -- copied to the Kafka header correlationId
+  correlation_id VARCHAR(64),             -- trace id of the request, sent as the Kafka header correlationId
+  traceparent    VARCHAR(64),             -- W3C trace context, sent as the Kafka header traceparent
   payload      JSONB NOT NULL,
   created_at   TIMESTAMPTZ NOT NULL,
   published_at TIMESTAMPTZ
@@ -334,7 +336,7 @@ Every state change writes **patient row, audit entry and outbox row in one trans
 
 Why: publishing to Kafka directly after the database commit can lose the event (or the other way around). The outbox removes that dual-write problem.
 
-Implemented in full (ADR 0005), including the correlation id column and the metrics `triage.outbox.pending`, `triage.outbox.published` and `triage.outbox.failures`; the fallback of publishing after the commit was not needed. The relay loop is configurable and is switched off in tests, which call it explicitly.
+Implemented in full (ADR 0005), including the trace columns and the metrics `triage.outbox.pending`, `triage.outbox.published` and `triage.outbox.failures`; the fallback of publishing after the commit was not needed. The relay loop is configurable and is switched off in tests, which call it explicitly.
 
 ### 6.6 Escalation (RF-03, RN-03)
 
@@ -535,11 +537,12 @@ The assistant **never calls the triage API**. A consumer in its own group (`assi
 ## 8. Authentication and authorization
 
 - `auth-service` exposes `POST /auth/token` (credentials from configuration, passwords stored hashed) and `GET /.well-known/jwks.json`.
-- Tokens are **RS256**, short-lived (for example 15 minutes), with `sub`, `roles`, `iss`, `exp`.
-- The private key comes from an environment variable or secret. If absent (development only), a key pair is generated at startup with a warning.
+- Tokens are **RS256**, short-lived (15 minutes), with `sub`, `roles`, `iss`, `aud`, `iat`, `exp`, `jti` and a `kid` header. The resource servers check signature, issuer, audience and expiration (ADR 0003 and 0020).
+- The private key comes from an environment variable or secret. Without it the service refuses to start, unless `auth.jwt.generate-key-if-missing` is on (local profile only), which generates a key pair with a warning.
+- `POST /auth/token` is rate limited (10 attempts per minute per username and per address) and answers 429 with `Retry-After`.
 - `triage-service` and `assistant-service` are OAuth2 resource servers that validate tokens with the public key fetched from the JWKS endpoint (lazily, so they do not need `auth-service` at startup).
 - Roles: `NURSE` (register patients) and `DOCTOR` (reports, assistant); both can change a patient's state (see ADR 0013). Reads of a patient and of the urgency view are open to both.
-- Public: Actuator liveness and readiness. Everything else requires a valid JWT.
+- Public: Actuator liveness and readiness. `/actuator/prometheus` needs HTTP Basic with the scraper credentials. Everything else requires a valid JWT.
 - Input validation on every request; no credential is ever committed.
 
 In production, identity would be delegated to a managed provider (Microsoft Entra ID or Keycloak) without changing the two resource servers.
@@ -548,7 +551,7 @@ In production, identity would be delegated to a managed provider (Microsoft Entr
 
 ## 9. Event contract (`triaje.eventos`)
 
-Topic: `triaje.eventos`, 3 partitions, key = `pacienteId`. JSON value (field names in Spanish, as part of the external contract); headers: `correlationId`, `eventType`.
+Topic: `triaje.eventos`, 3 partitions, key = `pacienteId`. JSON value (field names in Spanish, as part of the external contract); headers: `correlationId` (the trace id), `traceparent` and `eventType`.
 
 ```json
 {
@@ -571,26 +574,35 @@ Event types: `paciente_registrado`, `paciente_en_consulta`, `paciente_alta`, `pa
 
 ## 10. Cross-cutting concerns
 
-**Errors.** A `WebExceptionHandler` (functional endpoints do not use `@RestControllerAdvice`) maps domain exceptions to `ProblemDetail`: 400 validation (names the field), 404, 409, 503, plus 401/403 from Spring Security.
+**Errors.** Every service answers every error in the same RFC 7807 shape (ADR 0018): `type`, `title`, `status`, `detail`, `instance` (the path), `traceId` and `timestamp`; validation errors add `errores` (a list of `campo` and `mensaje`). The HTTP status line and the body field `status` come from the same value. Each service has one global `WebExceptionHandler` that extends the shared base class and only maps its own exceptions (functional endpoints have no controller advice); malformed bodies, wrong types (naming the field), oversized bodies (413), unsupported media types (415), unknown routes and unexpected errors (a generic 500) are handled by the base. 401 and 403 use the same writer through the shared entry point and denied handler. 429 comes from the token rate limit. Domain exceptions live in the domain layer and carry no HTTP knowledge.
 
-**Observability.**
-- Probes: Actuator liveness and readiness (database, Redis; Kafka reachability for readiness where practical).
-- Metrics (Micrometer): `triage.classification` by level, `triage.escalations`, `triage.outbox.pending`, `assistant.llm.latency`, `assistant.answers` by outcome (`answered`, `no_protocol`, `rejected`, `degraded`), circuit breaker state.
-- Logs: structured JSON (Spring Boot structured logging) with a correlation id, propagated through the Reactor context and Kafka headers.
-- Distributed tracing with OpenTelemetry is a bonus.
+**Observability (ADR 0019).**
+- Traces: OpenTelemetry through Micrometer Tracing, with Reactor context propagation. The trace id is the correlation id: it is in every log line, in the error bodies, in the outbox row and in the Kafka headers `correlationId` and `traceparent`. Export to an OTLP endpoint is optional (`TRACING_EXPORT_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`); Jaeger runs in the local compose file.
+- Logs: Spring Boot structured logging, ECS JSON on the console (plain text in the `local` profile). Logs go to standard output and are collected by the platform; they are not stored in the database (the clinical audit is a separate table). One access-log line per request (method, path, status, duration, user), never bodies or tokens.
+- Metrics (Micrometer, Prometheus format, common tag `application`): `triage.classification` by level, `triage.outbox.pending`, `triage.outbox.published`, `triage.outbox.failures`, and in later phases `triage.escalations`, `assistant.llm.latency`, `assistant.answers` by outcome (`answered`, `no_protocol`, `rejected`, `degraded`) and the circuit breaker state. `/actuator/prometheus` needs HTTP Basic (ADR 0020).
+- Health: liveness state only for liveness; readiness of the triage service is the readiness state plus the database, and deliberately not Kafka (the outbox absorbs an outage). The assistant adds its database and Redis. Shutdown is graceful.
 
-**Configuration (properties and environment).**
+**Security hardening (ADR 0020).** Audience claim check, 64 KB body limit, rate limit on the token endpoint, strict JSON, protected metrics, no actuator endpoint except health, info and Prometheus, and no internal detail in answers or logs.
 
-| Property or variable | Purpose |
-|---|---|
-| `triage.sla.minutes.*` | SLA per level |
-| `triage.escalation.interval`, `triage.escalation.batch-size` | Scheduler tuning |
-| `triage.administrative-complaints` | Level 5 complaint list |
-| `assistant.rag.top-k`, `assistant.rag.max-distance` | Retrieval tuning |
-| `assistant.llm.provider` (`gemini` or `mock`) | LLM selection |
-| `GEMINI_API_KEY` | Provider key (environment only) |
-| `JWT_PRIVATE_KEY` | Signing key |
-| Database, Redis, Kafka coordinates | Infrastructure |
+**Configuration (properties and environment).** Nothing secret lives in the repository; the `local` profile has development defaults only.
+
+| Property or variable | Used by | Purpose |
+|---|---|---|
+| `triage.sla.minutes.*` | triage | SLA per level |
+| `triage.escalation.interval`, `triage.escalation.batch-size` | triage | Scheduler tuning (phase 4) |
+| `triage.administrative-complaints` | triage | Level 5 complaint list |
+| `triage.outbox.relay.*`, `triage.outbox.topic.*` | triage | Relay loop and topic creation |
+| `TRIAGE_DB_URL`, `TRIAGE_DB_USER`, `TRIAGE_DB_PASSWORD` | triage | PostgreSQL (R2DBC) |
+| `KAFKA_BOOTSTRAP_SERVERS` | triage, assistant | Kafka |
+| `AUTH_JWKS_URI` | triage, assistant | Public keys of the auth service |
+| `JWT_PRIVATE_KEY` | auth | Signing key (PKCS#8 PEM); `auth.jwt.generate-key-if-missing` only in `local` |
+| `auth.jwt.issuer`, `auth.jwt.audience`, `auth.jwt.ttl`, `auth.rate-limit.*` | auth | Token settings and rate limit |
+| `triaxis.security.issuer`, `triaxis.security.audience` | triage, assistant | Token checks |
+| `METRICS_USER`, `METRICS_PASSWORD` | all | Credentials of the metrics scraper |
+| `TRACING_EXPORT_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `TRACING_SAMPLING_PROBABILITY` | all | OpenTelemetry export |
+| `assistant.rag.top-k`, `assistant.rag.max-distance` | assistant | Retrieval tuning (phase 5) |
+| `assistant.llm.provider` (`gemini` or `mock`), `GEMINI_API_KEY` | assistant | LLM selection and key (environment only) |
+| Redis coordinates | assistant | Urgency view (phase 5) |
 
 **Backpressure.** Kafka consumers use `max.poll.records` and a bounded `flatMap` concurrency; the outbox relay works in batches; R2DBC pool sizes and WebClient timeouts are explicit.
 
@@ -618,11 +630,11 @@ Minimum coverage required: classification E1 to E6, valid and invalid transition
 
 ## 12. Deployment
 
-**Local:** one `docker-compose up` starts PostgreSQL (with pgvector, two databases created by an init script), Kafka (KRaft, topic created on startup), Redis and the three services. Default LLM profile is `mock`, so no API key is required.
+**Local:** one `docker-compose up` starts PostgreSQL (with pgvector, two databases created by an init script), Kafka (KRaft, topic created on startup), Redis, Jaeger (traces) and the three services. Default LLM profile is `mock`, so no API key is required.
 
-**Kubernetes manifests (`deploy/k8s/`):** namespace; Deployments for the three services with liveness and readiness probes and resource requests and limits; PostgreSQL, Kafka and Redis (single replica, with persistent volumes where needed); Services; ConfigMap and Secrets; one Ingress with path-based routing (`/auth`, `/triage`, `/asistente`). The same manifests are validated locally on kind or minikube.
+**Kubernetes manifests (`deploy/k8s/`):** namespace; Deployments for the three services with liveness and readiness probes and resource requests and limits; PostgreSQL, Kafka and Redis (single replica, with persistent volumes where needed); Services; ConfigMap and Secrets; one Ingress with path-based routing (`/auth`, `/triage`, `/asistente`). The same manifests are validated locally on kind or minikube. Rules that already apply to the images and manifests: configuration only through environment variables (table in section 10), graceful shutdown, readiness without Kafka for triage, `/actuator` not routed by the Ingress, a Secret for the metrics credentials, the signing key and the database passwords, non-root containers and pinned base image tags.
 
-**Azure (target, to confirm):** AKS with a single node, running the stateful pieces in the cluster to keep cost low (managed alternatives such as Event Hubs with a Kafka endpoint, Azure Cache for Redis and Azure Database for PostgreSQL cost more and add configuration). Images from a registry reachable by the cluster. Budget alert configured, resource group deleted after the evaluation. Costs and node sizing must be checked before choosing.
+**Azure (target, to confirm):** AKS with a single node, running the stateful pieces in the cluster to keep cost low (managed alternatives such as Event Hubs with a Kafka endpoint, Azure Cache for Redis and Azure Database for PostgreSQL cost more and add configuration). Images from a registry reachable by the cluster. Budget alert configured, resource group deleted after the evaluation. Costs and node sizing must be checked before choosing. Observability in Azure: Container Insights for the logs of standard output, a Prometheus scrape of `/actuator/prometheus` with the Secret credentials (Azure Monitor managed Prometheus or an in-cluster Prometheus), and an OTLP endpoint for traces (Application Insights or Jaeger); all optional for the deliverable and decided in the deployment ADR.
 
 **CI (stretch):** GitHub Actions workflow that builds and runs the tests on every push.
 
@@ -662,6 +674,9 @@ Status `written` means the file exists in `docs/adr/` (checked by `scripts/check
 | 0015 | MapStruct for boundary mappers | written |
 | 0016 | Hexagonal architecture enforced by ArchUnit and BlockHound tests | written |
 | 0017 | Business validation lives in the domain | written |
+| 0018 | Shared web module and a single error format | written |
+| 0019 | Observability: OpenTelemetry traces, ECS logs, metrics and health | written |
+| 0020 | API hardening: audience, body limit, rate limit and protected metrics | written |
 
 At least two are required; the more concrete ones (0001, 0002, 0006, 0007) are the priority.
 

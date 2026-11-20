@@ -10,6 +10,7 @@ Working checklist. Follow the phases in order; tick boxes as work lands. Source 
 | 1 Auth | done | `phase-1-auth` |
 | 2 Triage core | done | `phase-2-triage-core` |
 | 3 Events (outbox) | done | `phase-3-events` |
+| Platform foundation (errors, observability, hardening) | done | `platform-foundation` |
 | 4 Escalation | next | |
 | 5 Assistant | pending | |
 | 6 Operation report | pending | |
@@ -27,6 +28,7 @@ Branch from `develop` and open pull requests as in `GIT_WORKFLOW.md`. Starting p
 - A patient who entered consultation or was discharged is never escalated, and a patient is escalated once (RN-03); the tests must cover the race with a concurrent `PATCH`.
 - A scheduler adapter goes in `infrastructure.adapter.in.scheduler`, next to the outbox scheduler; BlockHound and ArchUnit tests must keep passing.
 - ADR 0006 (atomic escalation) is written in the pull request that implements it; the other pending ADRs are listed in `ARCHITECTURE.md` section 14.
+- Conventions that now apply: errors through the shared base handler and writer (a new exception goes in the service handler's `mapDomain`); a new endpoint needs its role rule in the service's `AuthorizationRulesCustomizer`; new business metrics use the `application` tag automatically; no secrets in the repository.
 - Documentation sync: follow the checklist in `CLAUDE.md` and run `scripts/check-docs.sh` before each pull request.
 
 ## Cut list and priorities
@@ -35,10 +37,10 @@ The scope is large. When a phase takes longer than expected, apply cuts from the
 
 ### Cut list (in order)
 
-1. OpenTelemetry
-2. CI workflow
-3. Outbox (fall back to publish after commit with retry; record it in the ADR)
-4. Email and SSE alternatives for alerts (documentation only)
+1. CI workflow
+2. Email and SSE alternatives for alerts (documentation only)
+
+(OpenTelemetry and the outbox were built in full and are no longer candidates.)
 
 ### Never cut
 
@@ -325,6 +327,23 @@ One entry per finished piece of work: what was done, decisions taken, how it was
 - **Manual check:** with the compose PostgreSQL and Kafka and both services running, a registration and a status change produced two messages on `triaje.eventos` (read with `kafka-console-consumer`) with the patient id as key, the headers `eventType` and `correlationId` (the one sent by the caller, or a generated one), the contract payload, and both outbox rows marked as published.
 - **Not verified yet:** a consumer built on these events (phase 5, the assistant) and the behavior of the relay across several replicas on a real cluster.
 
+### Platform foundation (done, between phases 3 and 4)
+
+- **What:** the cross-cutting gaps found after phase 3, built in one feature branch and one pull request.
+  - New library `triaxis-web`: the single writer of error responses (RFC 7807 with `instance`, `traceId` and `timestamp`), the base class of the global exception handlers, the 401 and 403 handlers, the access log and the protected metrics endpoint. Triage and auth use it; the duplicated error code was removed.
+  - 401 and 403 now use the standard format with `WWW-Authenticate`.
+  - OpenTelemetry through Micrometer Tracing with Reactor context propagation; the trace id is the correlation id (logs, errors, outbox, Kafka headers `correlationId` and `traceparent`). The custom correlation filter was removed. Jaeger was added to the compose file.
+  - ECS JSON logs (plain text in the `local` profile).
+  - Metrics: common tag `application`; `/actuator/prometheus` with HTTP Basic from `METRICS_USER` and `METRICS_PASSWORD`, denied when no password is set.
+  - Health: readiness of triage includes the database and not Kafka; graceful shutdown.
+  - Hardening: `aud` claim issued and checked, 64 KB body limit, rate limit on the token endpoint (429 with `Retry-After`).
+  - The assistant skeleton gets the same configuration.
+  - Process: one pull request per feature or phase, merged with rebase and merge (`GIT_WORKFLOW.md`); `check-docs.sh` also checks that every module is documented.
+- **Decisions:** ADR 0018 (shared web module and error format), ADR 0019 (observability), ADR 0020 (hardening); assumptions A26 to A30.
+- **Verified:** `./gradlew build` passes on JDK 21 (new tests: error format and the 401, 403, 413, 415 and 500 cases, protected metrics with and without credentials, access log content without bodies or tokens, audience, rate limit, trace id in the outbox and in Kafka headers). Manual check with the compose infrastructure: JSON logs carry `traceId` and `spanId`, a request with a `traceparent` header keeps its trace id through the outbox into the Kafka headers, Jaeger lists both services, the metrics endpoint answers 401 without or with wrong credentials and 200 with the right ones, and the local profile prints plain text logs.
+- **Found while testing:** a JUnit run once hung in a WebTestClient call that has no timeout; it did not reproduce in ten later runs. A default JUnit timeout of 120 seconds was added to the services so a hang fails with a stack trace instead of blocking.
+- **Not verified yet:** traces reaching Azure, the Prometheus scrape in a cluster, and the consumer side of the `traceparent` header (assistant, phase 5).
+
 ---
 
 ## Improvements (out of scope for now)
@@ -332,5 +351,6 @@ One entry per finished piece of work: what was done, decisions taken, how it was
 Ideas that were consciously left out of the first delivery:
 
 - Read endpoint for the clinical audit (`GET /triage/pacientes/{id}/auditoria`); the audit is written and protected, but only readable through the database.
-- Custom `ProblemDetail` bodies for 401 and 403 responses coming from Spring Security.
+- Write the trace id as the nested ECS field `trace.id` instead of the top-level `traceId` of the JSON log line.
+- A distributed rate limiter and account lockout for the token endpoint.
 - Key rotation procedure for the JWT signing key and token revocation.

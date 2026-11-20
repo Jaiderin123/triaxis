@@ -25,3 +25,6 @@ Ambiguities in the requirements specification that change behavior are recorded 
 | 0015 | [MapStruct for boundary mappers](0015-mapstruct-boundary-mappers.md) | Accepted |
 | 0016 | [Hexagonal architecture enforced by tests](0016-hexagonal-architecture.md) | Accepted |
 | 0017 | [Business validation lives in the domain](0017-validation-in-the-domain.md) | Accepted |
+| 0018 | [Shared web module and a single error format](0018-shared-web-module-and-error-format.md) | Accepted |
+| 0019 | [Observability: OpenTelemetry traces, ECS logs, metrics and health](0019-observability-opentelemetry-ecs-metrics.md) | Accepted |
+| 0020 | [API hardening: audience, body limit, rate limit and protected metrics](0020-api-hardening.md) | Accepted |

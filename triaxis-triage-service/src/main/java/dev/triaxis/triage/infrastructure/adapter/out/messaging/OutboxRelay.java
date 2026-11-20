@@ -35,7 +35,7 @@ public class OutboxRelay {
 	private static final String LOCK = "SELECT pg_try_advisory_xact_lock(hashtext('triaxis.outbox.relay')) AS acquired";
 
 	private static final String PENDING = """
-			SELECT id, message_key, event_type, correlation_id, payload::text AS payload
+			SELECT id, message_key, event_type, correlation_id, traceparent, payload::text AS payload
 			FROM outbox_events
 			WHERE published_at IS NULL
 			ORDER BY id
@@ -90,7 +90,7 @@ public class OutboxRelay {
 		return client.sql(PENDING).bind("batch", settings.batchSize())
 				.map((row, metadata) -> new PendingEvent(row.get("id", Long.class), row.get("message_key", String.class),
 						row.get("event_type", String.class), row.get("correlation_id", String.class),
-						row.get("payload", String.class)))
+						row.get("traceparent", String.class), row.get("payload", String.class)))
 				.all().collectList()
 				.flatMapMany(Flux::fromIterable)
 				.concatMap(this::deliver)
@@ -122,6 +122,10 @@ public class OutboxRelay {
 						record.headers().add(TriageEvent.CORRELATION_ID_HEADER,
 								event.correlationId().getBytes(StandardCharsets.UTF_8));
 					}
+					if (event.traceparent() != null) {
+						record.headers().add(TriageEvent.TRACEPARENT_HEADER,
+								event.traceparent().getBytes(StandardCharsets.UTF_8));
+					}
 					return Mono.fromFuture(kafka.send(record));
 				})
 				.subscribeOn(Schedulers.boundedElastic())
@@ -136,7 +140,8 @@ public class OutboxRelay {
 				.then();
 	}
 
-	private record PendingEvent(Long id, String key, String type, String correlationId, String payload) {
+	private record PendingEvent(Long id, String key, String type, String correlationId, String traceparent,
+			String payload) {
 	}
 
 }

@@ -5,7 +5,9 @@ import java.util.concurrent.TimeUnit;
 import dev.triaxis.auth.application.port.in.IssueTokenUseCase;
 import dev.triaxis.auth.infrastructure.adapter.in.web.dto.TokenRequest;
 import dev.triaxis.auth.infrastructure.adapter.in.web.dto.TokenResponse;
+import dev.triaxis.auth.infrastructure.adapter.in.web.ratelimit.LoginRateLimiter;
 import dev.triaxis.auth.infrastructure.adapter.in.web.validation.RequestValidationException;
+import dev.triaxis.web.problem.FieldProblem;
 import dev.triaxis.auth.infrastructure.adapter.in.web.validation.RequestValidator;
 import dev.triaxis.auth.infrastructure.adapter.out.jwt.SigningKeyProvider;
 import org.springframework.http.CacheControl;
@@ -21,22 +23,33 @@ public class AuthHandler {
 	private final IssueTokenUseCase issueToken;
 	private final RequestValidator validator;
 	private final SigningKeyProvider keys;
+	private final LoginRateLimiter limiter;
 
-	AuthHandler(IssueTokenUseCase issueToken, RequestValidator validator, SigningKeyProvider keys) {
+	AuthHandler(IssueTokenUseCase issueToken, RequestValidator validator, SigningKeyProvider keys,
+			LoginRateLimiter limiter) {
 		this.issueToken = issueToken;
 		this.validator = validator;
 		this.keys = keys;
+		this.limiter = limiter;
 	}
 
 	public Mono<ServerResponse> token(ServerRequest request) {
 		return request.bodyToMono(TokenRequest.class)
-				.switchIfEmpty(Mono.error(new RequestValidationException(java.util.List.of("body"))))
+				.switchIfEmpty(Mono.error(new RequestValidationException(
+						java.util.List.of(new FieldProblem("body", "is required")))))
 				.map(validator::validate)
+				.doOnNext(body -> limit(request, body.username()))
 				.flatMap(body -> issueToken.issue(body.username(), body.password()))
 				.flatMap(issued -> ServerResponse.ok()
 						.contentType(MediaType.APPLICATION_JSON)
 						.cacheControl(CacheControl.noStore())
 						.bodyValue(new TokenResponse(issued.accessToken(), "Bearer", issued.expiresInSeconds())));
+	}
+
+	/** Limits the attempts per username and per client address; the address is not available in every setup. */
+	private void limit(ServerRequest request, String username) {
+		limiter.check("user:" + username.toLowerCase(java.util.Locale.ROOT));
+		request.remoteAddress().ifPresent(address -> limiter.check("ip:" + address.getAddress().getHostAddress()));
 	}
 
 	public Mono<ServerResponse> jwks(ServerRequest request) {
