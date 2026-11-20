@@ -11,24 +11,22 @@ Working checklist. Follow the phases in order; tick boxes as work lands. Source 
 | 2 Triage core | done | `phase-2-triage-core` |
 | 3 Events (outbox) | done | `phase-3-events` |
 | Platform foundation (errors, observability, hardening) | done | `platform-foundation` |
-| 4 Escalation | next | |
-| 5 Assistant | pending | |
+| 4 Escalation | in review (pull request to `develop`; tag `phase-4-escalation` after the release) | |
+| 5 Assistant | next | |
 | 6 Operation report | pending | |
 | 7 Alerts | pending | |
 | 8 Deployment | pending | |
 | 9 Docs | pending | |
 
-### Where to resume (phase 4)
+### Where to resume (phase 5)
 
-Branch `feat/phase-4-escalation` from `develop` and follow `GIT_WORKFLOW.md` (one pull request per phase, rebase and merge; the release pull request to `main` is merged with a merge commit and tagged). The approved decisions and the task list are in the Phase 4 section below. Starting points for escalation:
+Phase 4 is built on `feat/phase-4-escalation` and goes to `develop` through its pull request, then to `main` with a merge commit and the tag `phase-4-escalation`. After that, branch `feat/phase-5-assistant` from `develop`. Starting points for the assistant:
 
-- The atomic statement is in `ARCHITECTURE.md` section 6.6: one `UPDATE ... RETURNING` with `FOR UPDATE SKIP LOCKED` over `REGISTERED` patients whose SLA expired and that are not escalated.
-- The audit entry (event type `ESCALATED`, same status before and after, actor `system`) and the outbox event `paciente_escalado` are written in the same transaction. `PatientEventType.ESCALATED`, `EventType.PACIENTE_ESCALADO` and the mapper entries already exist.
-- The interval, the batch size and the SLA per level are properties (`triage.sla.minutes`, plus new `triage.escalation.*`), so tests can use seconds. Time comes from `ClockPort`.
-- A patient who entered consultation or was discharged is never escalated, and a patient is escalated once (RN-03); the tests must cover the race with a concurrent `PATCH`.
-- A scheduler adapter goes in `infrastructure.adapter.in.scheduler`, next to the outbox scheduler; BlockHound and ArchUnit tests must keep passing.
-- ADR 0006 (atomic escalation) is written in the pull request that implements it; the other pending ADRs are listed in `ARCHITECTURE.md` section 14.
-- Conventions that now apply: errors through the shared base handler and writer (a new exception goes in the service handler's `mapDomain`); a new endpoint needs its role rule in the service's `AuthorizationRulesCustomizer`; new business metrics use the `application` tag automatically; no secrets in the repository.
+- Plan the phase first and record the approved decisions in the Phase 5 section below before writing code (CLAUDE.md, documentation sync item 7). Open points: the Spring AI Google GenAI starters (left as a TODO in phase 0 because their auto-configuration needs an API key), the `mock` profile as default, the threshold calibration and the Redis test container.
+- The event contract is ready in `triaxis-common` (`TriageEvent`, four event types, all carrying the level). Escalation events have no `correlationId` or `traceparent` header (ASSUMPTIONS A31), so the consumer must treat them as optional.
+- The urgency view is built only from Kafka (group `assistant-urgency-view`, manual ack, Lua script in Redis); never call the triage API.
+- ADRs due in the phase: 0002 (vectors over R2DBC), 0004 (degraded mode), 0007 (anti-hallucination), 0008 (Gemini).
+- Conventions that apply: errors through the shared base handler and writer, role rules in the service's `AuthorizationRulesCustomizer`, BlockHound and ArchUnit tests, blocking SDK calls on `boundedElastic`, no real LLM in tests, no secrets in the repository.
 - Documentation sync: follow the checklist in `CLAUDE.md` and run `scripts/check-docs.sh` before each pull request.
 
 ## Cut list and priorities
@@ -156,15 +154,15 @@ First commit: `feat(triage): publish patient events through a transactional outb
 
 **Goal:** RF-03 and RN-03.
 
-Decisions (approved, not started yet): one branch `feat/phase-4-escalation` and one pull request for the whole phase, with a few logical commits; scheduler interval of 30 seconds by default (`triage.escalation.interval`, 1 second in tests), batch size 100, loop repeated at once when a batch is full; the actor of the audit entries is `system`; the `GET` of a patient does not get a new field (the `escalado` flag already exists); an escalated patient stays `REGISTRADO` and `status_changed_at` does not change; SLA expiry is strictly greater (A6); counter `triage.escalations` tagged by level; tag `phase-4-escalation`.
+Decisions (approved): one branch `feat/phase-4-escalation` and one pull request for the whole phase, with a few logical commits; scheduler interval of 30 seconds by default (`triage.escalation.interval`, 1 second in tests), batch size 100, loop repeated at once when a batch is full; the actor of the audit entries is `system`; the `GET` of a patient does not get a new field (the `escalado` flag already exists); an escalated patient stays `REGISTRADO` and `status_changed_at` does not change; SLA expiry is strictly greater (A6); counter `triage.escalations` tagged by level; tag `phase-4-escalation`.
 
 Tasks
-- [ ] Domain event `PatientEvent.escalated`, audit entry of type `ESCALATED` (same status before and after, `escalated = true`), mapper entry (the enum values already exist)
-- [ ] `PatientRepository.escalateOverdue(now, batch)`: one atomic `UPDATE ... RETURNING` with `FOR UPDATE SKIP LOCKED` (`ARCHITECTURE.md` 6.6)
-- [ ] `EscalateOverduePatientsUseCase`: runs the update and, for every escalated patient, writes the audit entry and the outbox event in the same unit of work
-- [ ] `EscalationScheduler` (`infrastructure.adapter.in.scheduler`) with `triage.escalation.enabled`, `interval` and `batch-size` as properties; switched off in tests, which call the use case
-- [ ] Metric `triage.escalations` by level
-- [ ] ADR 0006 (atomic escalation), architecture and plan updated
+- [x] Domain event `PatientEvent.escalated`, audit entry of type `ESCALATED` (same status before and after, `escalated = true`), mapper entry (the enum values already exist)
+- [x] `PatientRepository.escalateOverdue(now, batch)`: one atomic `UPDATE ... RETURNING` with `FOR UPDATE SKIP LOCKED` (`ARCHITECTURE.md` 6.6)
+- [x] `EscalateOverduePatientsUseCase`: runs the update and, for every escalated patient, writes the audit entry and the outbox event in the same unit of work
+- [x] `EscalationScheduler` (`infrastructure.adapter.in.scheduler`) with `triage.escalation.enabled`, `interval` and `batch-size` as properties; switched off in tests, which call the use case
+- [x] Metric `triage.escalations` by level
+- [x] ADR 0006 (atomic escalation), architecture and plan updated
 
 Modules: `triaxis-triage-service`.
 
@@ -348,6 +346,14 @@ One entry per finished piece of work: what was done, decisions taken, how it was
 - **Verified:** `./gradlew build` passes on JDK 21 (new tests: error format and the 401, 403, 413, 415 and 500 cases, protected metrics with and without credentials, access log content without bodies or tokens, audience, rate limit, trace id in the outbox and in Kafka headers). Manual check with the compose infrastructure: JSON logs carry `traceId` and `spanId`, a request with a `traceparent` header keeps its trace id through the outbox into the Kafka headers, Jaeger lists both services, the metrics endpoint answers 401 without or with wrong credentials and 200 with the right ones, and the local profile prints plain text logs.
 - **Found while testing:** a JUnit run once hung in a WebTestClient call that has no timeout; it did not reproduce in ten later runs. A default JUnit timeout of 120 seconds was added to the services so a hang fails with a stack trace instead of blocking.
 - **Not verified yet:** traces reaching Azure, the Prometheus scrape in a cluster, and the consumer side of the `traceparent` header (assistant, phase 5).
+
+### Phase 4: Escalation (done, in review)
+
+- **What:** the domain rules `Patient.slaExceededAt`, `escalationDueAt` and `escalate` (strict limit, only `REGISTERED` and never escalated, status and `status_changed_at` unchanged); `PatientEvent.escalated`; the port `PatientRepository.escalateOverdue(now, limit)` with one atomic `UPDATE ... RETURNING` over a CTE with `FOR UPDATE SKIP LOCKED`, ordered by `registered_at, id`, and the status and flag checked again on the locked rows; `EscalateOverduePatientsUseCase`, which writes the flag, one audit entry (`ESCALATED`, actor `system`) and one `paciente_escalado` outbox event per patient in one unit of work, then increments `triage.escalations` by level; the `EscalationScheduler` input adapter (`triage.escalation.enabled`, `interval` PT30S, `batch-size` 100; cycles never overlap, a full batch starts another one, a failed cycle is logged and retried on the next tick).
+- **Decisions:** ADR 0006; assumptions A31 (escalation events carry no request trace) and A32 (both statuses of the event and audit entry are the current one). The escalation rows are read completely before the audit and outbox statements run on the same connection. MapStruct reads `Patient.escalate(Instant)` as a fluent setter, so the entity mapper ignores it explicitly.
+- **Tests:** domain (strict limit, statuses, already escalated, the escalation keeps the status); use case with fake ports (audit, event, metric, second run, oldest first and batch size, rollback when the audit or the event fails); PostgreSQL (escalated once and a second run does nothing, `EN_CONSULTA`, `ALTA` and escalated never selected, strict limit, order and batch size, flag, audit and outbox rolled back together, two concurrent runs escalate each of ten patients once, 25 rounds of a concurrent `PATCH` keep the audit order, the counter); Kafka (the event arrives with the level, both statuses and `escalado = true`); scheduler (full batches chained, a failed cycle does not stop the loop); BlockHound over the escalation; ArchUnit. Integration tests share one database, so each escalation test back-dates its patients to its own epoch, earlier than every previous one, and uses a fixed clock.
+- **Verified:** `./gradlew build` passes on JDK 21 (triage: 235 tests). Manual check with the compose PostgreSQL and Kafka, auth and triage running, an SLA of 1 minute for level 1 and an interval of 5 seconds: a critical patient registered through the API was escalated about 65 seconds later; the audit shows `REGISTERED` by `nurse` and `ESCALATED` by `system` with the same status before and after; the patient stays `REGISTRADO` with `status_changed_at` unchanged; both outbox rows were published; `kafka-console-consumer` shows `paciente_escalado` with `escalado: true`, the level and the patient id as key; a later `PATCH` to `EN_CONSULTA` works and `escalado` stays true.
+- **Not verified yet:** several replicas escalating at the same time on a real cluster (covered by the concurrent test only), and the alert reaction to the event (phase 7).
 
 ---
 

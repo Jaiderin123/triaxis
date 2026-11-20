@@ -18,6 +18,7 @@ Ambiguities in the requirements specification that change behavior are recorded 
 | 0001 | [Spring Kafka instead of Reactor Kafka](0001-spring-kafka-instead-of-reactor-kafka.md) | Accepted |
 | 0003 | [Separate identity service with RS256 and JWKS](0003-identity-service-rs256-jwks.md) | Accepted |
 | 0005 | [Transactional outbox for event publication](0005-transactional-outbox.md) | Accepted |
+| 0006 | [Atomic escalation with a conditional update and `SKIP LOCKED`](0006-atomic-escalation.md) | Accepted |
 | 0009 | [Spring Boot 3.5 and Spring AI 1.1, chosen on purpose](0009-spring-boot-3-5-and-spring-ai-1-1.md) | Accepted |
 | 0012 | [Functional endpoints instead of annotated controllers](0012-functional-endpoints.md) | Accepted |
 | 0013 | [Who may change a patient's state](0013-state-change-roles.md) | Accepted |

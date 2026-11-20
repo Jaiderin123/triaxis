@@ -348,18 +348,18 @@ WITH overdue AS (
   WHERE status = 'REGISTERED'
     AND NOT escalated
     AND registered_at + make_interval(mins => sla_minutes) < :now
-  ORDER BY registered_at
+  ORDER BY registered_at, id
   LIMIT :batch
   FOR UPDATE SKIP LOCKED
 )
 UPDATE patients p
 SET escalated = TRUE, escalated_at = :now
 FROM overdue o
-WHERE p.id = o.id
-RETURNING p.id, p.level, p.sla_minutes, p.registered_at;
+WHERE p.id = o.id AND p.status = 'REGISTERED' AND NOT p.escalated
+RETURNING p.*;
 ```
 
-For each returned row, in the same transaction: insert the audit entry and the outbox row (`paciente_escalado`).
+For each returned row (oldest first), in the same transaction: insert the audit entry (type `ESCALATED`, actor `system`, the same status before and after) and the outbox row (`paciente_escalado`, with `estadoAnterior` and `estadoNuevo` both `REGISTRADO` and `escalado: true`). The status and `status_changed_at` do not change. The counter `triage.escalations` (tag `level`) is incremented after the commit. Implemented by `EscalateOverduePatientsUseCase`, `PatientRepository.escalateOverdue(now, limit)` and the `EscalationScheduler` input adapter (ADR 0006).
 
 Why this satisfies RN-03:
 
@@ -386,7 +386,7 @@ sequenceDiagram
     N->>N: send alert (webhook), retry with backoff
 ```
 
-The interval and the SLA per level are application properties, so tests can use seconds instead of minutes.
+The interval (`triage.escalation.interval`, 30 seconds by default), the batch size (`triage.escalation.batch-size`, 100) and the SLA per level are application properties, so a manual check can use a short SLA. Cycles never overlap, a full batch starts another one at once, and a failed cycle is logged and retried on the next tick. The loop is switched off in tests (`triage.escalation.enabled=false`), which call the use case with a fixed clock and back-dated patients.
 
 ### 6.7 Operation report (RF-05)
 
@@ -579,7 +579,7 @@ Event types: `paciente_registrado`, `paciente_en_consulta`, `paciente_alta`, `pa
 **Observability (ADR 0019).**
 - Traces: OpenTelemetry through Micrometer Tracing, with Reactor context propagation. The trace id is the correlation id: it is in every log line, in the error bodies, in the outbox row and in the Kafka headers `correlationId` and `traceparent`. Export to an OTLP endpoint is optional (`TRACING_EXPORT_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`); Jaeger runs in the local compose file.
 - Logs: Spring Boot structured logging, ECS JSON on the console (plain text in the `local` profile). Logs go to standard output and are collected by the platform; they are not stored in the database (the clinical audit is a separate table). One access-log line per request (method, path, status, duration, user), never bodies or tokens.
-- Metrics (Micrometer, Prometheus format, common tag `application`): `triage.classification` by level, `triage.outbox.pending`, `triage.outbox.published`, `triage.outbox.failures`, and in later phases `triage.escalations`, `assistant.llm.latency`, `assistant.answers` by outcome (`answered`, `no_protocol`, `rejected`, `degraded`) and the circuit breaker state. `/actuator/prometheus` needs HTTP Basic (ADR 0020).
+- Metrics (Micrometer, Prometheus format, common tag `application`): `triage.classification` by level, `triage.outbox.pending`, `triage.outbox.published`, `triage.outbox.failures`, `triage.escalations` by level, and in later phases `assistant.llm.latency`, `assistant.answers` by outcome (`answered`, `no_protocol`, `rejected`, `degraded`) and the circuit breaker state. `/actuator/prometheus` needs HTTP Basic (ADR 0020).
 - Health: liveness state only for liveness; readiness of the triage service is the readiness state plus the database, and deliberately not Kafka (the outbox absorbs an outage). The assistant adds its database and Redis. Shutdown is graceful.
 
 **Security hardening (ADR 0020).** Audience claim check, 64 KB body limit, rate limit on the token endpoint, strict JSON, protected metrics, no actuator endpoint except health, info and Prometheus, and no internal detail in answers or logs.
@@ -589,7 +589,7 @@ Event types: `paciente_registrado`, `paciente_en_consulta`, `paciente_alta`, `pa
 | Property or variable | Used by | Purpose |
 |---|---|---|
 | `triage.sla.minutes.*` | triage | SLA per level |
-| `triage.escalation.interval`, `triage.escalation.batch-size` | triage | Scheduler tuning (phase 4) |
+| `triage.escalation.enabled`, `triage.escalation.interval`, `triage.escalation.batch-size` | triage | Escalation loop (defaults `true`, `PT30S`, `100`) |
 | `triage.administrative-complaints` | triage | Level 5 complaint list |
 | `triage.outbox.relay.*`, `triage.outbox.topic.*` | triage | Relay loop and topic creation |
 | `TRIAGE_DB_URL`, `TRIAGE_DB_USER`, `TRIAGE_DB_PASSWORD` | triage | PostgreSQL (R2DBC) |
@@ -662,7 +662,7 @@ Status `written` means the file exists in `docs/adr/` (checked by `scripts/check
 | 0003 | Separate identity service with RS256 and JWKS | written |
 | 0004 | Degraded mode: circuit breaker, 503, and Triage independence | pending (assistant) |
 | 0005 | Transactional outbox for event publication | written |
-| 0006 | Atomic escalation with conditional update and `SKIP LOCKED` | pending (phase 4) |
+| 0006 | Atomic escalation with conditional update and `SKIP LOCKED` | written |
 | 0007 | Anti-hallucination strategy (retrieval gate, validated citations) | pending (assistant) |
 | 0008 | Gemini for LLM and embeddings; Ollama and DeepSeek discarded | pending (assistant) |
 | 0009 | Spring Boot 3.5 / Spring AI 1.1 out of OSS support, chosen on purpose | written |
