@@ -416,7 +416,30 @@ FROM hourly h
 ORDER BY hour;
 ```
 
-Assumptions: waiting time is registration to the first (and only) transition into consultation; patients discharged directly have no waiting time and are excluded from the average and p95; hours without patients are omitted.
+Assumptions: waiting time is registration to the first (and only) transition into consultation; patients discharged directly have no waiting time and are excluded from the average and p95; hours without patients are omitted (A7, A8, A41 to A43).
+
+- **Range:** `desde` included, `hasta` excluded, both required. A date (`2026-11-19`) is a whole UTC day (in `hasta` the day is included); an instant needs a zone (`Z` or an offset); a date-time without a zone is a 400. The range must not be empty or longer than `triage.report.max-range` (31 days). The parsing is in the web layer; the rules of the range are in the domain (`ReportRange`, ADR 0017).
+- **Buckets:** UTC hours (the session is UTC, ADR 0022); a patient counts in the hour of its registration. Patients still waiting and patients discharged directly count in the totals but not in the waits; an hour where nobody entered consultation has `null` waits. Waits are minutes rounded to 2 decimals. `rank()` gives tied hours the same rank.
+- **Index:** `CREATE INDEX IF NOT EXISTS idx_patients_registered_at ON patients (registered_at)` supports the range filter.
+- **Response:**
+
+```json
+{
+  "desde": "2026-11-19T00:00:00Z",
+  "hasta": "2026-11-20T00:00:00Z",
+  "horas": [
+    {
+      "hora": "2026-11-19T15:00:00Z",
+      "totalPacientes": 7,
+      "porNivel": { "CRITICO": 1, "URGENTE": 2, "URGENTE_2": 0, "NO_URGENTE": 3, "NO_URGENTE_2": 1 },
+      "esperaPromedioMinutos": 12.5,
+      "esperaP95Minutos": 30.25,
+      "totalAcumulado": 20,
+      "rankingCarga": 1
+    }
+  ]
+}
+```
 
 ### 6.8 Alerts to the medical team (RF-06, open requirement)
 
@@ -439,7 +462,7 @@ External names are Spanish, as specified.
 | `POST /triage/pacientes` | NURSE | 201 with `id`, `nivel`, `slaMinutos`, `estado: "REGISTRADO"`, `fechaRegistro` (ISO 8601) | 400 (invalid field), 401, 403 |
 | `PATCH /triage/pacientes/{id}/estado` body `{ "estado": "..." }` | NURSE, DOCTOR | 200 | 400, 404, 409 |
 | `GET /triage/pacientes/{id}` | NURSE, DOCTOR | 200: full data, `estado`, flags (`escalado`), time in current state | 404 |
-| `GET /triage/reportes/operacion?desde=&hasta=` | DOCTOR | 200: list of hourly buckets | 400 (invalid range) |
+| `GET /triage/reportes/operacion?desde=&hasta=` | DOCTOR | 200: `desde`, `hasta` and `horas`, one entry per UTC hour with patients (section 6.7) | 400 (missing, invalid, inverted, empty or longer than 31 days, naming the field), 401, 403 |
 
 Request body fields: `nombreCompleto`, `edad`, `frecuenciaCardiaca`, `presionSistolica`, `presionDiastolica`, `spo2`, `temperatura`, `dolor`, `gcs`, `quejaPrincipal`. Because the exact field names are not given, common variants are accepted with `@JsonAlias` (for example `nombre`, `fc`, `heartRate`), and the choice is documented in the README.
 
@@ -632,6 +655,7 @@ Event types: `paciente_registrado`, `paciente_en_consulta`, `paciente_alta`, `pa
 | `triage.sla.minutes.*` | triage | SLA per level |
 | `triage.escalation.enabled`, `triage.escalation.interval`, `triage.escalation.batch-size`, `triage.escalation.batch-timeout` | triage | Escalation loop (defaults `true`, `PT30S`, `100`, `PT60S`), validated at startup |
 | `triage.administrative-complaints` | triage | Level 5 complaint list |
+| `triage.report.max-range` | triage | Longest range of the operation report (default `P31D`, phase 6) |
 | `triage.outbox.relay.*` (including `send-timeout` 15 s, `cycle-budget` 30 s and `cycle-timeout` 60 s, validated so that the timeout exceeds budget plus send), `triage.outbox.topic.*` | triage | Relay loop and topic creation |
 | `TRIAGE_DB_URL`, `TRIAGE_DB_USER`, `TRIAGE_DB_PASSWORD` | triage | PostgreSQL (R2DBC) |
 | `KAFKA_BOOTSTRAP_SERVERS` | triage, assistant | Kafka |

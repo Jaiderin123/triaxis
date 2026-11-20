@@ -274,3 +274,24 @@ A1 to A4 come from `ARCHITECTURE.md` section 6.2. A5 onward were added while pre
 - **Why:** the escalation of a patient must not move because the configuration changed while the patient waited, and the event and the audit keep the value that was applied.
 - **Impact if wrong:** applying a new SLA to waiting patients needs the escalation statement to read the current value per level instead of the stored one.
 
+## A41. Response of the operation report
+
+- **Ambiguity:** RF-05 lists the data per hour but not the JSON shape.
+- **Decision:** an object with the range asked (`desde`, `hasta`, as UTC instants) and `horas`, a list ordered by hour. Each hour has `hora` (UTC, ISO 8601 with `Z`), `totalPacientes`, `porNivel` with the five levels (zeros included), `esperaPromedioMinutos`, `esperaP95Minutos`, `totalAcumulado` (running total over the range) and `rankingCarga` (rank by number of patients, ties share the rank). See `ARCHITECTURE.md` section 6.7.
+- **Why:** echoing the range shows how dates were interpreted; an object can grow (for example totals of the range) without breaking clients; `porNivel` is the same shape as the urgency view.
+- **Impact if wrong:** a client that expects a bare list reads `horas`; renaming fields is a DTO change.
+
+## A42. Range of the operation report
+
+- **Ambiguity:** RF-05 asks for a "range of ISO 8601 dates" without saying which forms, whether the end is included, or any limit.
+- **Decision:** both parameters are required. Each one is either a date (`2026-11-19`, a whole UTC day: `desde` is its start and `hasta` includes it, so it means the start of the next day) or an instant with a zone (`2026-11-19T15:00:00Z`, `2026-11-19T10:00:00-05:00`). A date-time without a zone is rejected with 400 because it is ambiguous. The range is half-open (`desde` included, `hasta` excluded), must not be empty or inverted, and is at most `triage.report.max-range` (31 days, at most 744 hours). Errors are 400 naming `desde` or `hasta`.
+- **Why:** dates cover the common use (a day or a week) and instants give full control; a zone avoids guessing between UTC and Colombia; the limit keeps the query bounded.
+- **Impact if wrong:** a client sending a local date-time gets 400 and must add the zone; a longer range must be split or the property raised.
+
+## A43. Waiting time in the operation report
+
+- **Ambiguity:** RF-05 defines the wait as registration to first entry into consultation, but not which hour a patient belongs to, nor what to show when nobody entered consultation.
+- **Decision:** a patient counts in the UTC hour of its registration. The wait is `consultation_started_at - registered_at` in minutes; patients still waiting and patients discharged directly (A7) are counted in `totalPacientes` and `porNivel` but not in the waits. When no patient of an hour entered consultation, both waits are `null`. The p95 is `percentile_cont(0.95)` (interpolated). Waits are rounded to 2 decimals.
+- **Why:** grouping by registration keeps one hour per patient and matches the totals; `null` is not a zero wait; the interpolated percentile is stable with few patients.
+- **Impact if wrong:** grouping by the hour of consultation would move patients between hours; `percentile_disc` would return a real wait instead of an interpolated one.
+

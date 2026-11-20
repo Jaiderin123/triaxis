@@ -14,7 +14,7 @@ Working checklist. Follow the phases in order; tick boxes as work lands. Source 
 | 4 Escalation | done | `phase-4-escalation` |
 | 5 Assistant | done | `phase-5-assistant` |
 | Review fixes of 2026-11-19 (between phases 5 and 6) | done | `review-2026-11-19` |
-| 6 Operation report | next | |
+| 6 Operation report | next (planned) | |
 | 7 Alerts | pending | |
 | 8 Deployment | pending | |
 | 9 Docs | pending | |
@@ -37,7 +37,7 @@ Every pull request of phases 6 to 9 checks, in addition to the build and `script
 
 Phases 4 and 5 are released to `main` (tags `phase-4-escalation` and `phase-5-assistant`), and so are the fixes of the review of 2026-11-19 (tag `review-2026-11-19`). Next is phase 6, the operation report (RF-05):
 
-- Plan it first and record the approved decisions in the Phase 6 section before writing code (CLAUDE.md, documentation sync item 7). The SQL is in `ARCHITECTURE.md` section 6.7; the assumptions A7 (discharged directly, no waiting time), A8 (hours without patients) and A12 (UTC buckets) apply.
+- The phase is planned: the approved decisions are in the Phase 6 section below (A41 to A43). Start with `feat/phase-6-report` from `develop`. The SQL is in `ARCHITECTURE.md` section 6.7; A7, A8 and A12 also apply.
 - One branch from `develop` and one pull request, rebase and merge; then the release pull request to `main` (merge commit) and the tag.
 - Conventions that now apply to every service: the definition of done above; a source package named `out` is tracked (the ignore rule only covers `/out/` and `/*/out/`); in the assistant, BlockHound is installed when the test JVM starts; errors through the shared base handler and writer; the security chain denies every route without its rule; database sessions are UTC; no secrets in the repository.
 - For the report: `date_trunc('hour', ...)` gives UTC hours because the session is UTC (ADR 0022, tested in `SessionTimeZoneTest`); the endpoint is `DOCTOR` only and needs its rule in `SecurityRulesConfiguration`.
@@ -234,13 +234,32 @@ Definition of done: `./gradlew build` passes, `scripts/check-docs.sh` passes, an
 
 **Goal:** RF-05.
 
+Decisions (approved, not started yet):
+- One branch `feat/phase-6-report` from `develop`, one pull request (rebase and merge), then the release to `main` and the tag `phase-6-report`.
+- `GET /triage/reportes/operacion?desde=&hasta=`, `DOCTOR` only. The response is an object with `desde`, `hasta` and `horas` (A41).
+- `desde` and `hasta` are required; each is a date (a whole UTC day) or an instant with a zone; a date-time without a zone is 400; the range is half-open, not empty, at most 31 days (`triage.report.max-range`) (A42).
+- Hours without patients are omitted (A8). Buckets are UTC hours by registration; waits only count patients who entered consultation, `null` when none did; minutes with 2 decimals; `rank()` with shared ranks for ties (A43).
+- One SQL query as in `ARCHITECTURE.md` 6.7 (`FILTER`, `percentile_cont`, `sum() OVER`, `rank() OVER`), never aggregated in memory; a new index on `patients (registered_at)`.
+- Hexagonal: domain `ReportRange` (validation) and `HourlyLoad`; `GetOperationReportUseCase`; port `ReportQuery`; R2DBC adapter; functional endpoint with a MapStruct mapper; the role rule in `SecurityRulesConfiguration`.
+
 Tasks
-- [ ] `ReportQuery` port and R2DBC adapter with the SQL in `ARCHITECTURE.md` 6.7 (`FILTER`, `percentile_cont`, `sum() OVER`, `rank() OVER`)
-- [ ] `GET /triage/reportes/operacion?desde=&hasta=` (DOCTOR), 400 for invalid or inverted range
+- [ ] Domain: `ReportRange` (half-open, not empty, maximum length, field violations) and `HourlyLoad`; unit tests first
+- [ ] Application: `GetOperationReportUseCase` and the `ReportQuery` port; test with a fake query
+- [ ] Persistence: the report SQL in an R2DBC adapter, the index on `registered_at`, the mapping of `numeric` and `null` waits
+- [ ] API: `GET /triage/reportes/operacion` (parsing of dates and instants with zone, 400 naming the field), DTOs in Spanish, MapStruct mapper, role rule
+- [ ] `triage.report.max-range` validated and documented in `ARCHITECTURE.md` section 10
+- [ ] Documentation and assumptions updated; manual check with the compose database
 
-Tests: Testcontainers dataset with known waits asserting counts per level, average, p95, cumulative total and rank; discharged-directly patients excluded from waits; empty range.
+Tests that must exist:
+- A Testcontainers dataset in a past epoch of its own, with known registrations and waits, that checks per hour the total, the counts per level, the average and the p95.
+- The running total, and the rank with a tie.
+- Patients discharged directly and still waiting are counted in the totals and excluded from the waits; an hour with no consultation has `null` waits.
+- An empty range gives an empty list, `hasta` is excluded, a whole day from date parameters, an instant with an offset.
+- 400 for missing, malformed, zone-less, inverted, empty and longer than 31 days ranges, naming the field.
+- 401 without a token, 403 for `NURSE`, 200 for `DOCTOR`, and the route rule test passes.
+- Buckets are UTC with the test JVM in `America/Bogota`, and the report flow under BlockHound.
 
-Definition of done: `./gradlew :triaxis-triage-service:test --tests '*Report*'`.
+Definition of done: `./gradlew build` and `scripts/check-docs.sh` pass, a fresh clone compiles, the checklist of phases 6 to 9 is met, and a manual check with the compose database shows the report of patients registered and moved through triage.
 
 First commit: `feat(triage): add hourly operation report with window functions`
 
