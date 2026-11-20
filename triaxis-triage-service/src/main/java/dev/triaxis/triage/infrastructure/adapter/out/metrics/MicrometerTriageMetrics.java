@@ -5,7 +5,7 @@ import dev.triaxis.triage.domain.model.TriageLevel;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.stereotype.Component;
 
-/** Counter {@code triage.classification} tagged with the assigned level. */
+/** Counters {@code triage.classification} and {@code triage.escalations}, tagged with the patient level. */
 @Component
 class MicrometerTriageMetrics implements TriageMetrics {
 
@@ -18,6 +18,11 @@ class MicrometerTriageMetrics implements TriageMetrics {
 	@Override
 	public void patientClassified(TriageLevel level) {
 		registry.counter("triage.classification", "level", level.name()).increment();
+	}
+
+	@Override
+	public void patientEscalated(TriageLevel level) {
+		registry.counter("triage.escalations", "level", level.name()).increment();
 	}
 
 }

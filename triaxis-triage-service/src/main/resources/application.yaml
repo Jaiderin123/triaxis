@@ -102,6 +102,11 @@ triage:
     - renovacion de recetario
     - vacunacion
     - seguimiento
+  escalation:
+    # Patients that exceeded their SLA are flagged by one atomic statement per batch (RF-03, ADR 0006).
+    enabled: true
+    interval: PT30S
+    batch-size: 100
   outbox:
     relay:
       enabled: true
