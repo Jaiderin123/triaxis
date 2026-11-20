@@ -202,7 +202,7 @@ Patterns and their location (used only where they solve a real problem):
 | Enum-based state machine | `domain/model/PatientStatus` | Allowed transitions live next to the states |
 | Static factory | `Patient.register(...)`, event factory | Create entities in a valid state |
 | Repository | `port.out` plus R2DBC adapters | Persistence abstraction |
-| Decorator | `ResilientClinicalAnswerGenerator` wraps the Spring AI adapter with circuit breaker and timeout | Resilience without polluting the adapter, explicit and testable instead of annotations |
+| Decorator | `ResilientLlmAdapter` wraps the provider adapter (Gemini or mock) with circuit breaker and timeouts (ADR 0004) | Resilience without polluting the adapter, explicit and testable instead of annotations |
 | Anti-corruption layer / Mapper | `adapter.in.web.mapper`, persistence mappers | External contract (Spanish) and storage never leak into the domain |
 | Transactional outbox | `adapter.out.messaging` | Reliable event publication |
 | Null object | `LoggingAlertNotifier` as the default notifier | The system works without an external webhook |
@@ -348,18 +348,18 @@ WITH overdue AS (
   WHERE status = 'REGISTERED'
     AND NOT escalated
     AND registered_at + make_interval(mins => sla_minutes) < :now
-  ORDER BY registered_at
+  ORDER BY registered_at, id
   LIMIT :batch
   FOR UPDATE SKIP LOCKED
 )
 UPDATE patients p
 SET escalated = TRUE, escalated_at = :now
 FROM overdue o
-WHERE p.id = o.id
-RETURNING p.id, p.level, p.sla_minutes, p.registered_at;
+WHERE p.id = o.id AND p.status = 'REGISTERED' AND NOT p.escalated
+RETURNING p.*;
 ```
 
-For each returned row, in the same transaction: insert the audit entry and the outbox row (`paciente_escalado`).
+For each returned row (oldest first), in the same transaction: insert the audit entry (type `ESCALATED`, actor `system`, the same status before and after) and the outbox row (`paciente_escalado`, with `estadoAnterior` and `estadoNuevo` both `REGISTRADO` and `escalado: true`). The status and `status_changed_at` do not change. The counter `triage.escalations` (tag `level`) is incremented after the commit. Implemented by `EscalateOverduePatientsUseCase`, `PatientRepository.escalateOverdue(now, limit)` and the `EscalationScheduler` input adapter (ADR 0006).
 
 Why this satisfies RN-03:
 
@@ -386,7 +386,7 @@ sequenceDiagram
     N->>N: send alert (webhook), retry with backoff
 ```
 
-The interval and the SLA per level are application properties, so tests can use seconds instead of minutes.
+The interval (`triage.escalation.interval`, 30 seconds by default), the batch size (`triage.escalation.batch-size`, 100) and the SLA per level are application properties, so a manual check can use a short SLA. Cycles never overlap, a full batch starts another one at once, and a failed cycle is logged and retried on the next tick. The loop is switched off in tests (`triage.escalation.enabled=false`), which call the use case with a fixed clock and back-dated patients.
 
 ### 6.7 Operation report (RF-05)
 
@@ -464,36 +464,51 @@ flowchart TD
     l --> c{LLM output valid?<br/>cited ids subset of retrieved ids}
     c -- no --> n
     c -- yes --> a[Answer + sources built from corpus metadata]
+    e -. provider down, breaker open .-> d[503 + Retry-After<br/>no answer text]
+    l -. provider down, breaker open .-> d
 ```
+
+Classes (hexagonal layout of section 5):
+
+| Layer | Classes |
+|---|---|
+| Domain | `ProtocolParser`, `ProtocolChunk`, `QuestionPolicy`, `RetrievalPolicy` (gate), `CitationValidator`, `ClinicalAnswer`, `AnswerOutcome` |
+| Application | `IngestCorpusUseCase`, `AskClinicalQuestionUseCase`, `CorpusState`; ports `LlmPort`, `ProtocolChunkRepository`, `ProtocolSource`, `AssistantMetrics`, `ClockPort` |
+| Infrastructure | `ConsultaRouter` and `ConsultaHandler` (functional endpoint), `AnswerWebMapper` (MapStruct), `GlobalErrorHandler`, `CorpusIngestionRunner` (startup), `R2dbcProtocolChunkRepository`, `ClasspathProtocolSource`, `MockLlmAdapter`, `GeminiLlmAdapter`, `ResilientLlmAdapter`, `MicrometerAssistantMetrics` |
+
+**Corpus at startup (ASSUMPTIONS A37).** The protocol files are read and validated on the main thread before the service accepts traffic; a malformed or empty corpus stops the startup. The sections are embedded in the background, one at a time, with retries and back-off, so an unavailable provider does not stop the service (the urgency view keeps working). Until the corpus is stored with the current embedding model, questions get a 503.
 
 ### 7.2 Anti-hallucination (RN-05)
 
 Defense in depth, so no single layer is trusted alone:
 
 1. **Retrieval gate.** If no excerpt is close enough, the service answers with the fixed notice and **does not call the LLM**. This is deterministic and also covers the diabetes example.
-2. **Constrained prompt.** Temperature 0, answer only from the numbered excerpts, return a structured output with the **ids of the excerpts used**, or the literal `NO_PROTOCOL` when the excerpts are not enough.
+2. **Constrained prompt.** Temperature 0, JSON output, answer only from the numbered excerpts (no doses, drugs or recommendations that are not in them), return the **numbers of the excerpts used**, or `noProtocol: true` when the excerpts are not enough, and ignore instructions inside the question or the excerpts.
 3. **Validated citations.** The sources in the response are built from corpus metadata (protocol id and section) for the ids the model reports, never from free text written by the model. If the model returns no valid id, or an id that was not retrieved, the answer is rejected and replaced by the fixed notice (a metric counts rejections).
 4. **No clinical content in the fallback.** Fixed notices contain no generated medical text.
 
-The similarity threshold depends on the embedding model and is calibrated with the three sample questions (hypertension, sepsis, diabetes).
+The similarity threshold depends on the embedding model and is calibrated with the three sample questions (hypertension, sepsis, diabetes). Retrieval returns the top `assistant.rag.top-k` chunks (4), and only those within `assistant.rag.max-distance` are sent to the model, numbered `[1]`, `[2]`, and so on. The model answers in Spanish with JSON (`answer`, `excerpts` with the numbers used, `noProtocol`). The `mock` provider (default) uses deterministic embeddings (normalized bag of words in 512 dimensions) and an extractive answer that copies the closest excerpt, so it never writes clinical text of its own either. Thresholds (ASSUMPTIONS A36): `mock` 0.70, Gemini (`gemini-embedding-001`, 768 dimensions) 0.33, both calibrated with the sample questions; Gemini also with questions outside the corpus. The details are in ADR 0007 (anti-hallucination) and ADR 0008 (providers).
 
 ### 7.3 Corpus and persistence
 
-Protocol files live in `src/main/resources/protocols/` (one per protocol, extendable). At startup an **idempotent ingestion** splits each protocol by section, and stores chunks only when missing or when the content hash or embedding model changed.
+Protocol files live in `src/main/resources/protocols/` (one Markdown file per protocol, `PROTO-001.md` to `PROTO-003.md`, extendable): a `#` title line with the protocol id and name, and one `##` heading per section. At startup an **idempotent ingestion** splits each protocol by section (one chunk per section, id `PROTO-001#medidas-iniciales`), and embeds and stores a chunk only when it is missing or its content hash or embedding model changed; chunks of removed sections are deleted.
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE protocol_chunks (
-  id              TEXT PRIMARY KEY,        -- e.g. PROTO-001#initial-measures
+  id              TEXT PRIMARY KEY,        -- e.g. PROTO-001#medidas-iniciales
   protocol_id     TEXT NOT NULL,
+  protocol_title  TEXT NOT NULL,
   section         TEXT NOT NULL,
   content         TEXT NOT NULL,
-  content_hash    TEXT NOT NULL,
+  content_hash    TEXT NOT NULL,           -- SHA-256 of the embedded text (title, section and content)
   embedding_model TEXT NOT NULL,
-  embedding       vector,                  -- untyped dimension on purpose (see below)
-  created_at      TIMESTAMPTZ NOT NULL
+  embedding       vector NOT NULL,         -- untyped dimension on purpose (see below)
+  created_at      TIMESTAMPTZ NOT NULL,
+  updated_at      TIMESTAMPTZ NOT NULL
 );
+CREATE INDEX idx_protocol_chunks_model ON protocol_chunks (embedding_model);
 ```
 
 The column has no fixed dimension, so changing the embedding model does not require altering the schema: on model change, chunks are re-embedded. (An index would need a fixed dimension; for a handful of chunks a sequential scan is enough, and the ADR mentions HNSW for larger corpora.)
@@ -501,14 +516,15 @@ The column has no fixed dimension, so changing the embedding model does not requ
 Retrieval query:
 
 ```sql
-SELECT id, protocol_id, section, content, embedding <=> :query::vector AS distance
+SELECT id, protocol_id, protocol_title, section, content, content_hash,
+       embedding <=> CAST(:query AS vector) AS distance
 FROM protocol_chunks
 WHERE embedding_model = :model
-ORDER BY distance
+ORDER BY distance, id
 LIMIT :k;
 ```
 
-Vectors are sent as text with a `::vector` cast through R2DBC `DatabaseClient`, so the whole retrieval path is reactive. Spring AI is still used for `EmbeddingModel`, `ChatClient`, prompts and metrics.
+Vectors are sent as text with a `CAST(... AS vector)` through R2DBC `DatabaseClient`, so the whole retrieval path is reactive (ADR 0002). Spring AI is still used for `EmbeddingModel`, `ChatClient` and the structured output converter.
 
 ### 7.4 Degraded mode
 
@@ -518,19 +534,40 @@ Resilience4j circuit breaker `llm` wraps both the embedding and the chat call, w
 
 The assistant **never calls the triage API**. A consumer in its own group (`assistant-urgency-view`) maintains a Redis read model:
 
-- `urgency:patient:{id}` (hash: level, active) and `urgency:counters` (hash: level to count).
-- A **Lua script** applies each event atomically and idempotently: on `paciente_registrado`, if the patient is unknown, store it and increment its level; on `paciente_alta`, if the patient is active, mark inactive and decrement; `paciente_en_consulta` and `paciente_escalado` do not change counts (the patient is still active).
-- Offsets are committed only after the script succeeds (manual ack). Duplicates are harmless.
-- If Redis is lost, the view is rebuilt by replaying the topic from the earliest offset.
+- `urgency:patient:{id}` (hash: level, state `active` or `discharged`), `urgency:counters` (hash: level to count) and `urgency:meta` (time of the newest applied event).
+- A **Lua script** applies each event atomically and idempotently (ADR 0021):
 
-`GET /asistente/estado-urgencias` returns all five levels (zeros included) and a total.
+| Event | Patient unknown | Patient active | Patient discharged |
+|---|---|---|---|
+| `paciente_registrado`, `paciente_en_consulta`, `paciente_escalado` | store as active with the event level, add 1 | no change | no change |
+| `paciente_alta` | store as discharged, no count change | mark discharged, subtract 1 | no change |
+
+- Discharged is final; its key expires after `assistant.urgency.discharged-ttl` (30 days, longer than the topic retention), so a replay never counts a discharged patient again.
+- The listener (`UrgencyViewListener`) is asynchronous, as ADR 0001 says: it returns a `Mono` and acknowledges a record only after the script succeeded, so offsets are committed only for applied events. Records may be applied out of order, which the rules allow. At most `assistant.urgency.max-in-flight` (64) records are in flight; a Redis failure is retried with back-off until it works; a record that is not a valid event is logged (without its payload), counted and skipped (ASSUMPTIONS A38).
+- If Redis is lost (no `urgency:meta` key), the consumer reads the topic again from the earliest offset when its partitions are assigned, at startup or after a restart, before it processes any record, and the same rules rebuild the counts. The view is not rebuilt while the consumer runs: with asynchronous acknowledgments a seek does not replay the records.
+- The Lua script is read once at startup (`redis/urgency-apply.lua`); a script built from a resource reads the file again on a Redis I/O thread, which BlockHound reported.
+- Metric `assistant.urgency.events` by outcome (`applied`, `unchanged`, `invalid`). The listener continues the trace of the `traceparent` header (Kafka observation); `correlationId` is optional (A31).
+
+`GET /asistente/estado-urgencias` returns all five levels (zeros included), a total and the time of the newest applied event:
+
+```json
+{
+  "porNivel": { "CRITICO": 1, "URGENTE": 2, "URGENTE_2": 0, "NO_URGENTE": 3, "NO_URGENTE_2": 1 },
+  "total": 7,
+  "actualizadoEn": "2026-11-20T15:30:00Z"
+}
+```
+
+`actualizadoEn` is null while no event was applied.
 
 ### 7.6 API contract
 
 | Method and path | Role | Success | Errors |
 |---|---|---|---|
-| `POST /asistente/consulta` body `{ "pregunta": "..." }` | DOCTOR | 200 `{ "respuesta": "...", "fuentes": [ { "protocolo": "PROTO-001", "seccion": "..." } ] }`. If no protocol applies: 200 with the "no protocol available" notice and empty `fuentes` | 400 (blank question), 503 (LLM unavailable) |
-| `GET /asistente/estado-urgencias` | NURSE, DOCTOR | 200: counts per level for patients not discharged | n/a |
+| `POST /asistente/consulta` body `{ "pregunta": "..." }` | DOCTOR | 200 `{ "respuesta": "...", "fuentes": [ { "protocolo": "PROTO-001", "seccion": "..." } ] }`. If no protocol applies: 200 with `respuesta` = "No existe un protocolo disponible para esta pregunta." and `fuentes: []` | 400 (blank question or longer than 1000 characters), 401, 403, 503 (LLM unavailable) |
+| `GET /asistente/estado-urgencias` | NURSE, DOCTOR | 200 `{ "porNivel": {...five levels...}, "total": n, "actualizadoEn": "..." }` (section 7.5) | 401, 403 |
+
+`seccion` is the section title as written in the corpus (for example `Medidas iniciales`). Errors use the shared RFC 7807 format (section 10).
 
 ---
 
@@ -579,7 +616,7 @@ Event types: `paciente_registrado`, `paciente_en_consulta`, `paciente_alta`, `pa
 **Observability (ADR 0019).**
 - Traces: OpenTelemetry through Micrometer Tracing, with Reactor context propagation. The trace id is the correlation id: it is in every log line, in the error bodies, in the outbox row and in the Kafka headers `correlationId` and `traceparent`. Export to an OTLP endpoint is optional (`TRACING_EXPORT_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`); Jaeger runs in the local compose file.
 - Logs: Spring Boot structured logging, ECS JSON on the console (plain text in the `local` profile). Logs go to standard output and are collected by the platform; they are not stored in the database (the clinical audit is a separate table). One access-log line per request (method, path, status, duration, user), never bodies or tokens.
-- Metrics (Micrometer, Prometheus format, common tag `application`): `triage.classification` by level, `triage.outbox.pending`, `triage.outbox.published`, `triage.outbox.failures`, and in later phases `triage.escalations`, `assistant.llm.latency`, `assistant.answers` by outcome (`answered`, `no_protocol`, `rejected`, `degraded`) and the circuit breaker state. `/actuator/prometheus` needs HTTP Basic (ADR 0020).
+- Metrics (Micrometer, Prometheus format, common tag `application`): `triage.classification` by level, `triage.outbox.pending`, `triage.outbox.published`, `triage.outbox.failures`, `triage.escalations` by level, `assistant.llm.latency` (tags `operation` `embedding` or `answer`, `outcome` `success`, `failure` or `rejected`), `assistant.answers` by outcome (`answered`, `no_protocol`, `rejected`, `degraded`), `assistant.urgency.events` by outcome (`applied`, `unchanged`, `invalid`) and the circuit breaker state from Resilience4j. `/actuator/prometheus` needs HTTP Basic (ADR 0020).
 - Health: liveness state only for liveness; readiness of the triage service is the readiness state plus the database, and deliberately not Kafka (the outbox absorbs an outage). The assistant adds its database and Redis. Shutdown is graceful.
 
 **Security hardening (ADR 0020).** Audience claim check, 64 KB body limit, rate limit on the token endpoint, strict JSON, protected metrics, no actuator endpoint except health, info and Prometheus, and no internal detail in answers or logs.
@@ -589,7 +626,7 @@ Event types: `paciente_registrado`, `paciente_en_consulta`, `paciente_alta`, `pa
 | Property or variable | Used by | Purpose |
 |---|---|---|
 | `triage.sla.minutes.*` | triage | SLA per level |
-| `triage.escalation.interval`, `triage.escalation.batch-size` | triage | Scheduler tuning (phase 4) |
+| `triage.escalation.enabled`, `triage.escalation.interval`, `triage.escalation.batch-size` | triage | Escalation loop (defaults `true`, `PT30S`, `100`) |
 | `triage.administrative-complaints` | triage | Level 5 complaint list |
 | `triage.outbox.relay.*`, `triage.outbox.topic.*` | triage | Relay loop and topic creation |
 | `TRIAGE_DB_URL`, `TRIAGE_DB_USER`, `TRIAGE_DB_PASSWORD` | triage | PostgreSQL (R2DBC) |
@@ -601,8 +638,11 @@ Event types: `paciente_registrado`, `paciente_en_consulta`, `paciente_alta`, `pa
 | `METRICS_USER`, `METRICS_PASSWORD` | all | Credentials of the metrics scraper |
 | `TRACING_EXPORT_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `TRACING_SAMPLING_PROBABILITY` | all | OpenTelemetry export |
 | `assistant.rag.top-k`, `assistant.rag.max-distance` | assistant | Retrieval tuning (phase 5) |
-| `assistant.llm.provider` (`gemini` or `mock`), `GEMINI_API_KEY` | assistant | LLM selection and key (environment only) |
-| Redis coordinates | assistant | Urgency view (phase 5) |
+| `assistant.llm.provider` (`mock` by default), profile `gemini`, `GEMINI_API_KEY`, `GEMINI_CHAT_MODEL`, `GEMINI_EMBEDDING_MODEL` | assistant | LLM selection, models and key (key from the environment only); without the `gemini` profile the Gemini auto-configuration is off (ADR 0008) |
+| `assistant.rag.question-max-length`, `assistant.corpus.location`, `assistant.corpus.retry.*` | assistant | Question limit (1000), protocol folder, back-off of the corpus embedding |
+| `assistant.llm.timeout.*`, `resilience4j.circuitbreaker.instances.llm.*` | assistant | Timeouts (embedding 5 s, answer 20 s, `Retry-After` 30 s) and circuit breaker of the LLM calls (ADR 0004) |
+| `ASSISTANT_DB_URL`, `ASSISTANT_DB_USER`, `ASSISTANT_DB_PASSWORD` | assistant | PostgreSQL with pgvector (R2DBC) |
+| `REDIS_HOST`, `REDIS_PORT`, `assistant.urgency.discharged-ttl`, `assistant.urgency.max-in-flight`, `assistant.urgency.redis-timeout` | assistant | Urgency view: Redis, discharged marker (30 days), records in flight (64), Redis timeout (2 s) |
 
 **Backpressure.** Kafka consumers use `max.poll.records` and a bounded `flatMap` concurrency; the outbox relay works in batches; R2DBC pool sizes and WebClient timeouts are explicit.
 
@@ -620,7 +660,7 @@ Event types: `paciente_registrado`, `paciente_en_consulta`, `paciente_alta`, `pa
 | Web | Status codes, validation messages, authorization per role | `WebTestClient.bindToRouterFunction`, `spring-security-test` |
 | RAG | Citations present, no-match case without any LLM call, rejected invalid citation | Fake LLM and fake embeddings with controlled vectors |
 | Resilience | Breaker opens after failures and the endpoint answers 503 | Fake failing LLM |
-| Non-blocking | No blocking call on event-loop threads | BlockHound (optional) |
+| Non-blocking | No blocking call on event-loop threads | BlockHound: a flow test in triage; in the assistant it is installed when the test JVM starts, so every test runs under it |
 
 The LLM and embeddings are always faked in tests; no test calls a real provider.
 
@@ -658,13 +698,13 @@ Status `written` means the file exists in `docs/adr/` (checked by `scripts/check
 | ADR | Decision | Status |
 |---|---|---|
 | 0001 | Spring Kafka instead of Reactor Kafka (discontinued) | written |
-| 0002 | Custom R2DBC repository for vectors instead of `PgVectorStore` (blocking JDBC) | pending (assistant) |
+| 0002 | Custom R2DBC repository for vectors instead of `PgVectorStore` (blocking JDBC) | written |
 | 0003 | Separate identity service with RS256 and JWKS | written |
-| 0004 | Degraded mode: circuit breaker, 503, and Triage independence | pending (assistant) |
+| 0004 | Degraded mode: circuit breaker, 503, and Triage independence | written |
 | 0005 | Transactional outbox for event publication | written |
-| 0006 | Atomic escalation with conditional update and `SKIP LOCKED` | pending (phase 4) |
-| 0007 | Anti-hallucination strategy (retrieval gate, validated citations) | pending (assistant) |
-| 0008 | Gemini for LLM and embeddings; Ollama and DeepSeek discarded | pending (assistant) |
+| 0006 | Atomic escalation with conditional update and `SKIP LOCKED` | written |
+| 0007 | Anti-hallucination strategy (retrieval gate, validated citations) | written |
+| 0008 | Gemini for LLM and embeddings; Ollama and DeepSeek discarded | written |
 | 0009 | Spring Boot 3.5 / Spring AI 1.1 out of OSS support, chosen on purpose | written |
 | 0010 | Deployment strategy and cost control on Azure | pending (deployment) |
 | 0011 | Alert channel for escalated patients | pending (alerts) |
@@ -677,6 +717,7 @@ Status `written` means the file exists in `docs/adr/` (checked by `scripts/check
 | 0018 | Shared web module and a single error format | written |
 | 0019 | Observability: OpenTelemetry traces, ECS logs, metrics and health | written |
 | 0020 | API hardening: audience, body limit, rate limit and protected metrics | written |
+| 0021 | Idempotent urgency view that tolerates missing, repeated and late events | written |
 
 At least two are required; the more concrete ones (0001, 0002, 0006, 0007) are the priority.
 

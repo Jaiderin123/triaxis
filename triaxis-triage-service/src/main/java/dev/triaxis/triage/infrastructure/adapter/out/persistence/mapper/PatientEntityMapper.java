@@ -24,6 +24,8 @@ public interface PatientEntityMapper {
 	PatientEntity toEntity(Patient patient);
 
 	@Mapping(target = "vitalSigns", source = "entity")
+	// Patient.escalate(Instant) is a domain operation, not a property; MapStruct reads it as a fluent setter.
+	@Mapping(target = "escalate", ignore = true)
 	Patient toDomain(PatientEntity entity);
 
 	default VitalSigns toVitalSigns(PatientEntity entity) {

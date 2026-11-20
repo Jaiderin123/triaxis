@@ -17,12 +17,15 @@ See [docs/TECH_STACK.md](docs/TECH_STACK.md).
 Requirements: JDK 21 and Docker. The full one-command run (all services in containers) arrives with the deployment phase; today the infrastructure runs in containers and the services run from Gradle.
 
 ```bash
-docker compose up -d postgres kafka kafka-init jaeger   # add redis when the assistant needs it
+docker compose up -d postgres kafka kafka-init redis jaeger
 
-# in two terminals (JAVA_HOME must point to a JDK 21)
+# in separate terminals (JAVA_HOME must point to a JDK 21)
 ./gradlew :triaxis-auth-service:bootRun --args='--spring.profiles.active=local'
 ./gradlew :triaxis-triage-service:bootRun --args='--spring.profiles.active=local'
+./gradlew :triaxis-assistant-service:bootRun --args='--spring.profiles.active=local'   # mock provider, no key
 ```
+
+The assistant answers with the deterministic `mock` provider by default. To use Gemini, export `GEMINI_API_KEY` (never commit it) and add the `gemini` profile: `--spring.profiles.active=local,gemini`.
 
 Local demonstration users (profile `local` only): `nurse` / `nurse-demo` and `doctor` / `doctor-demo`.
 
@@ -33,6 +36,14 @@ TOKEN=$(curl -s -X POST localhost:8083/auth/token -H 'Content-Type: application/
 curl -s -X POST localhost:8081/triage/pacientes -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"nombreCompleto":"Ana Gomez","edad":54,"frecuenciaCardiaca":130,"presionSistolica":180,"presionDiastolica":110,"spo2":97,"temperatura":36.8,"dolor":8,"gcs":15,"quejaPrincipal":"Dolor torácico"}'
+```
+
+### Escalation
+
+Patients who exceed the SLA of their level are escalated automatically: every 30 seconds (`triage.escalation.interval`) a single atomic statement flags them (`escalado: true`), writes an audit entry by `system` and publishes `paciente_escalado`. The status does not change, and a patient is escalated at most once. To see it quickly, start triage with a short SLA (verified):
+
+```bash
+./gradlew :triaxis-triage-service:bootRun --args='--spring.profiles.active=local --triage.sla.minutes.CRITICAL=1 --triage.escalation.interval=PT5S'
 ```
 
 ### Errors
@@ -58,8 +69,19 @@ Everything is configured through environment variables; nothing secret is in the
 | triage (8081) | `POST /triage/pacientes` | `NURSE` |
 | triage (8081) | `PATCH /triage/pacientes/{id}/estado` | `NURSE`, `DOCTOR` |
 | triage (8081) | `GET /triage/pacientes/{id}` | `NURSE`, `DOCTOR` |
+| assistant (8082) | `POST /asistente/consulta` with `{ "pregunta": "..." }` | `DOCTOR` |
+| assistant (8082) | `GET /asistente/estado-urgencias`: active patients per level, built only from the Kafka events | `NURSE`, `DOCTOR` |
 
-More endpoints (report, assistant) are added in later phases. Assumptions and ambiguities of the specification are in [docs/ASSUMPTIONS.md](docs/ASSUMPTIONS.md).
+The assistant answers only from the clinical protocols, with the cited `fuentes` taken from the corpus. When no protocol applies it answers `No existe un protocolo disponible para esta pregunta.` with empty `fuentes`, and when the language model is unavailable it answers 503 (ADRs 0004 and 0007).
+
+```bash
+TOKEN=$(curl -s -X POST localhost:8083/auth/token -H 'Content-Type: application/json' \
+  -d '{"username":"doctor","password":"doctor-demo"}' | jq -r .access_token)
+curl -s -X POST localhost:8082/asistente/consulta -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"pregunta":"¿Cuándo se administra el primer antibiótico en sepsis?"}'
+```
+
+More endpoints (operation report) are added in later phases. Assumptions and ambiguities of the specification are in [docs/ASSUMPTIONS.md](docs/ASSUMPTIONS.md).
 
 ## Decisions
 

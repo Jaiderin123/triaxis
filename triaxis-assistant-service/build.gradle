@@ -25,14 +25,17 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
 	implementation 'io.micrometer:micrometer-registry-prometheus'
 
+	implementation libs.mapstruct
+	annotationProcessor libs.mapstruct.processor
+
 	implementation libs.resilience4j.spring.boot3
 	implementation libs.resilience4j.reactor
 	implementation 'org.springframework.boot:spring-boot-starter-aop'
 
-	// TODO (phase 5): add the Spring AI Google GenAI starters
-	// (spring-ai-starter-model-google-genai and spring-ai-starter-model-google-genai-embedding, both
-	// present in Spring AI 1.1.8). They are left out until the mock profile exists, because their
-	// auto-configuration requires an API key and would break the context-load test.
+	// Gemini chat and embeddings (ADR 0008). Their auto-configuration is off unless the gemini profile is active
+	// (spring.ai.model.chat and spring.ai.model.embedding.text are none by default), so no key is needed otherwise.
+	implementation 'org.springframework.ai:spring-ai-starter-model-google-genai'
+	implementation 'org.springframework.ai:spring-ai-starter-model-google-genai-embedding'
 
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	testImplementation 'io.projectreactor:reactor-test'
@@ -41,7 +44,16 @@ dependencies {
 	testImplementation 'org.testcontainers:junit-jupiter'
 	testImplementation 'org.testcontainers:postgresql'
 	testImplementation 'org.testcontainers:kafka'
+	testImplementation 'org.testcontainers:r2dbc'
 	testImplementation libs.archunit.junit5
 	testImplementation libs.blockhound
-	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+	// Compile scope for the listener that installs BlockHound before any test (BlockHoundSessionListener).
+	testImplementation 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.withType(JavaCompile).configureEach {
+	options.compilerArgs += [
+		'-Amapstruct.defaultComponentModel=spring',
+		'-Amapstruct.unmappedTargetPolicy=ERROR'
+	]
 }

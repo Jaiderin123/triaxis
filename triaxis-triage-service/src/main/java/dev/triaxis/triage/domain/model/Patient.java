@@ -1,5 +1,6 @@
 package dev.triaxis.triage.domain.model;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -35,6 +36,33 @@ public record Patient(
 		TriageLevel level = classifier.classify(vitals, complaint);
 		return new Patient(id, fullName, data.age(), vitals, complaint, level, sla.minutesFor(level),
 				PatientStatus.REGISTERED, false, null, now, now, null);
+	}
+
+	/**
+	 * The SLA is exceeded only strictly after the limit: a patient exactly at the limit is not overdue yet
+	 * (ASSUMPTIONS A6).
+	 */
+	public boolean slaExceededAt(Instant now) {
+		return registeredAt.plus(Duration.ofMinutes(slaMinutes)).isBefore(now);
+	}
+
+	/** Only a waiting patient that was never escalated and exceeded its SLA is escalated (RN-03). */
+	public boolean escalationDueAt(Instant now) {
+		return status == PatientStatus.REGISTERED && !escalated && slaExceededAt(now);
+	}
+
+	/**
+	 * Marks the patient as escalated. The status and the time of the last status change do not change:
+	 * escalation is an alert, not a state (ASSUMPTIONS A9).
+	 *
+	 * @throws IllegalStateException when the escalation is not due
+	 */
+	public Patient escalate(Instant now) {
+		if (!escalationDueAt(now)) {
+			throw new IllegalStateException("Patient " + id + " is not due for escalation");
+		}
+		return new Patient(id, fullName, age, vitalSigns, chiefComplaint, level, slaMinutes, status, true, now,
+				registeredAt, statusChangedAt, consultationStartedAt);
 	}
 
 }

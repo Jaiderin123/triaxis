@@ -2,6 +2,7 @@ package dev.triaxis.triage.application.service;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -20,6 +21,7 @@ import dev.triaxis.triage.domain.model.Patient;
 import dev.triaxis.triage.domain.model.PatientEvent;
 import dev.triaxis.triage.domain.model.PatientStatus;
 import dev.triaxis.triage.domain.model.TriageLevel;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 /**
@@ -33,6 +35,7 @@ class FakeTriageStore implements PatientRepository, AuditRepository, EventPublis
 	final List<AuditEntry> audit = new ArrayList<>();
 	final List<PatientEvent> events = new ArrayList<>();
 	final List<TriageLevel> classified = new ArrayList<>();
+	final List<TriageLevel> escalatedLevels = new ArrayList<>();
 	final AtomicInteger committedUnits = new AtomicInteger();
 
 	Instant now = Instant.parse("2026-11-18T15:30:00Z");
@@ -70,6 +73,21 @@ class FakeTriageStore implements PatientRepository, AuditRepository, EventPublis
 					next == PatientStatus.IN_CONSULTATION ? at : current.consultationStartedAt());
 			patients.put(id, updated);
 			return Mono.just(updated);
+		});
+	}
+
+	/** Same selection as the SQL statement, expressed with the domain rules. */
+	@Override
+	public Flux<Patient> escalateOverdue(Instant at, int limit) {
+		return Flux.defer(() -> {
+			List<Patient> due = patients.values().stream()
+					.filter(patient -> patient.escalationDueAt(at))
+					.sorted(Comparator.comparing(Patient::registeredAt))
+					.limit(limit)
+					.map(patient -> patient.escalate(at))
+					.toList();
+			due.forEach(patient -> patients.put(patient.id(), patient));
+			return Flux.fromIterable(due);
 		});
 	}
 
@@ -114,6 +132,11 @@ class FakeTriageStore implements PatientRepository, AuditRepository, EventPublis
 	@Override
 	public void patientClassified(TriageLevel level) {
 		classified.add(level);
+	}
+
+	@Override
+	public void patientEscalated(TriageLevel level) {
+		escalatedLevels.add(level);
 	}
 
 	// UnitOfWork

@@ -11,24 +11,20 @@ Working checklist. Follow the phases in order; tick boxes as work lands. Source 
 | 2 Triage core | done | `phase-2-triage-core` |
 | 3 Events (outbox) | done | `phase-3-events` |
 | Platform foundation (errors, observability, hardening) | done | `platform-foundation` |
-| 4 Escalation | next | |
-| 5 Assistant | pending | |
-| 6 Operation report | pending | |
+| 4 Escalation | done | `phase-4-escalation` |
+| 5 Assistant | done | `phase-5-assistant` |
+| 6 Operation report | next | |
 | 7 Alerts | pending | |
 | 8 Deployment | pending | |
 | 9 Docs | pending | |
 
-### Where to resume (phase 4)
+### Where to resume (phase 6)
 
-Branch from `develop` and open pull requests as in `GIT_WORKFLOW.md`. Starting points for escalation:
+Phases 4 and 5 are released to `main` (tags `phase-4-escalation` and `phase-5-assistant`). Next is phase 6, the operation report (RF-05):
 
-- The atomic statement is in `ARCHITECTURE.md` section 6.6: one `UPDATE ... RETURNING` with `FOR UPDATE SKIP LOCKED` over `REGISTERED` patients whose SLA expired and that are not escalated.
-- The audit entry (event type `ESCALATED`, same status before and after, actor `system`) and the outbox event `paciente_escalado` are written in the same transaction. `PatientEventType.ESCALATED`, `EventType.PACIENTE_ESCALADO` and the mapper entries already exist.
-- The interval, the batch size and the SLA per level are properties (`triage.sla.minutes`, plus new `triage.escalation.*`), so tests can use seconds. Time comes from `ClockPort`.
-- A patient who entered consultation or was discharged is never escalated, and a patient is escalated once (RN-03); the tests must cover the race with a concurrent `PATCH`.
-- A scheduler adapter goes in `infrastructure.adapter.in.scheduler`, next to the outbox scheduler; BlockHound and ArchUnit tests must keep passing.
-- ADR 0006 (atomic escalation) is written in the pull request that implements it; the other pending ADRs are listed in `ARCHITECTURE.md` section 14.
-- Conventions that now apply: errors through the shared base handler and writer (a new exception goes in the service handler's `mapDomain`); a new endpoint needs its role rule in the service's `AuthorizationRulesCustomizer`; new business metrics use the `application` tag automatically; no secrets in the repository.
+- Plan it first and record the approved decisions in the Phase 6 section before writing code (CLAUDE.md, documentation sync item 7). The SQL is in `ARCHITECTURE.md` section 6.7; the assumptions A7 (discharged directly, no waiting time), A8 (hours without patients) and A12 (UTC buckets) apply.
+- One branch from `develop` and one pull request, rebase and merge; then the release pull request to `main` (merge commit) and the tag.
+- Conventions that now apply to every service: a source package named `out` is tracked (the ignore rule only covers `/out/` and `/*/out/`); check that a fresh clone compiles before each pull request; in the assistant, BlockHound is installed when the test JVM starts; errors through the shared base handler and writer; a new endpoint gets its role rule; no secrets in the repository.
 - Documentation sync: follow the checklist in `CLAUDE.md` and run `scripts/check-docs.sh` before each pull request.
 
 ## Cut list and priorities
@@ -156,41 +152,66 @@ First commit: `feat(triage): publish patient events through a transactional outb
 
 **Goal:** RF-03 and RN-03.
 
+Decisions (approved): one branch `feat/phase-4-escalation` and one pull request for the whole phase, with a few logical commits; scheduler interval of 30 seconds by default (`triage.escalation.interval`, 1 second in tests), batch size 100, loop repeated at once when a batch is full; the actor of the audit entries is `system`; the `GET` of a patient does not get a new field (the `escalado` flag already exists); an escalated patient stays `REGISTRADO` and `status_changed_at` does not change; SLA expiry is strictly greater (A6); counter `triage.escalations` tagged by level; tag `phase-4-escalation`.
+
 Tasks
-- [ ] `EscalationScheduler` with `triage.escalation.interval`, `batch-size` and SLA per level as properties
-- [ ] Atomic `UPDATE ... RETURNING` with `SKIP LOCKED`; audit and outbox rows in the same transaction
-- [ ] Metric `triage.escalations`
+- [x] Domain event `PatientEvent.escalated`, audit entry of type `ESCALATED` (same status before and after, `escalated = true`), mapper entry (the enum values already exist)
+- [x] `PatientRepository.escalateOverdue(now, batch)`: one atomic `UPDATE ... RETURNING` with `FOR UPDATE SKIP LOCKED` (`ARCHITECTURE.md` 6.6)
+- [x] `EscalateOverduePatientsUseCase`: runs the update and, for every escalated patient, writes the audit entry and the outbox event in the same unit of work
+- [x] `EscalationScheduler` (`infrastructure.adapter.in.scheduler`) with `triage.escalation.enabled`, `interval` and `batch-size` as properties; switched off in tests, which call the use case
+- [x] Metric `triage.escalations` by level
+- [x] ADR 0006 (atomic escalation), architecture and plan updated
 
 Modules: `triaxis-triage-service`.
 
-Tests: overdue patient escalated once; second run is a no-op (no second event, no second audit row); `EN_CONSULTA` and `ALTA` patients never escalated; two concurrent runs produce one escalation; race between `PATCH` and scheduler has a single winner. Use second-level SLAs and a fake `Clock`.
+Tests that must exist: an overdue patient is escalated once and a second run does nothing (no second event, no second audit row); `EN_CONSULTA`, `ALTA` and already escalated patients are never selected; the limit is strict (exactly at the SLA is not escalated, one instant later is); oldest first and the batch size is respected; patient, audit and outbox event are committed together and rolled back together; two concurrent runs escalate each patient once; 25 rounds of a concurrent `PATCH` and escalation keep the invariant that an `ESCALATED` audit entry never follows a `CONSULTATION_STARTED` or `DISCHARGED` one; the event reaches Kafka with the level and `escalado = true`; the counter increments; BlockHound and ArchUnit stay green. Use a fake clock or back-dated patients, never real waiting.
 
-Definition of done: `./gradlew :triaxis-triage-service:test --tests '*Escalation*'`.
+Definition of done: `./gradlew build` passes, `scripts/check-docs.sh` passes, and a manual check with the compose infrastructure and an SLA of 1 minute shows the escalation in the audit, the outbox and Kafka.
 
-First commit: `feat(triage): escalate overdue patients atomically and idempotently`
+Suggested commits inside the branch: domain and application; persistence and scheduler; tests and documentation.
 
 ## Phase 5: Assistant
 
 **Goal:** RF-04 A and B, RN-05, resilience.
 
-Tasks
-- [ ] Protocol files for PROTO-001 to PROTO-003 in `src/main/resources/protocols/`; idempotent ingestion (content hash and embedding model)
-- [ ] `protocol_chunks` with untyped `vector` column; custom R2DBC retrieval with `<=>`
-- [ ] `LlmPort` with Gemini adapter and `mock` adapter (deterministic embeddings and answers); `mock` is the default profile
-- [ ] `AskClinicalQuestionUseCase`: embed, retrieve, threshold gate (no LLM call below it), prompt with numbered excerpts, structured output with excerpt ids or `NO_PROTOCOL`, citation validation, sources from corpus metadata
-- [ ] `ResilientClinicalAnswerGenerator` decorator: circuit breaker, time limiter, 503 fallback
-- [ ] Kafka listener (group `assistant-urgency-view`, manual ack) with Lua script applying events idempotently to Redis
-- [ ] `GET /asistente/estado-urgencias` returns all five levels and a total
-- [ ] Metrics `assistant.llm.latency`, `assistant.answers` by outcome
-- [ ] Calibrate `assistant.rag.max-distance` with the three sample questions
+Decisions (approved, not started yet):
+- Two branches and two pull requests into `develop`: `feat/assistant-rag` (corpus, pgvector, LLM, anti-hallucination, circuit breaker) and then `feat/assistant-urgency-view` (Kafka and Redis). The release to `main` and the tag `phase-5-assistant` come after both.
+- No Gemini key yet: everything is built and tested with the `mock` provider (the default); the Gemini adapter is built and tested with fakes, and its threshold is calibrated later (ASSUMPTIONS A36, A16).
+- Gemini through the Spring AI 1.1.8 starters `spring-ai-starter-model-google-genai` and `spring-ai-starter-model-google-genai-embedding` (checked on Maven Central); with `mock` their auto-configuration is switched off with `spring.ai.model.chat=none` and `spring.ai.model.embedding.text=none`. Models are properties.
+- Corpus: one Markdown file per protocol, one chunk per section, id `PROTO-001#medidas-iniciales`; `seccion` is the section title of the corpus. Idempotent ingestion at startup (content hash and embedding model).
+- Retrieval: top-k 4 by cosine distance over R2DBC (`<=>`); only chunks within `max-distance` reach the model; none within it gives the fixed notice and no LLM call.
+- The model returns JSON with the answer and the excerpt numbers used, or `NO_PROTOCOL`; an invalid or unretrieved citation gives the fixed notice; sources come from corpus metadata only. Mock answer is extractive.
+- Fixed notice `No existe un protocolo disponible para esta pregunta.` (200, `fuentes: []`); `pregunta` required, at most 1000 characters (A34).
+- One circuit breaker `llm` over the embedding and the chat call, explicit timeouts, no retry of the chat call, 503 through the shared `ProblemWriter`.
+- Urgency view with the robust rule of ADR 0021 (A33 replaces A19): any non-discharge event registers an unknown patient, discharge is final with a 30-day marker; rebuild from the earliest offset when `urgency:meta` is missing.
+- Response of the view: `porNivel` with the five levels, `total`, `actualizadoEn` (A35).
+- Roles: `POST /asistente/consulta` is `DOCTOR`; `GET /asistente/estado-urgencias` is `NURSE` and `DOCTOR`.
+- Readiness: database and Redis, not Kafka and not the LLM.
+- Test containers: `pgvector/pgvector:pg16` (the same image as compose) and `redis:7.4-alpine`, through Testcontainers generic containers; no new test library.
+
+Pull request 1: RAG (`feat/assistant-rag`)
+- [x] Protocol files PROTO-001 to PROTO-003 in `src/main/resources/protocols/`; parser into sections
+- [x] Schema `protocol_chunks` (untyped `vector`), idempotent ingestion; custom R2DBC repository with `<=>` (ADR 0002)
+- [x] `LlmPort` (embedding and structured answer); `mock` adapter (default) and Gemini adapter with the starters; blocking calls on `boundedElastic`
+- [x] `AskClinicalQuestionUseCase`: embed, retrieve, threshold gate, numbered prompt, structured output, citation validation, sources from metadata (ADR 0007)
+- [x] `ResilientLlmAdapter` decorator: circuit breaker, timeouts, 503 with `Retry-After` (ADR 0004)
+- [x] `POST /asistente/consulta` (functional endpoint, MapStruct DTO mapper, global error handler on the shared base, role rule)
+- [x] Metrics `assistant.llm.latency`, `assistant.answers` by outcome (`answered`, `no_protocol`, `rejected`, `degraded`), breaker state
+- [x] Calibrate `assistant.rag.max-distance` of the `mock` provider with the three sample questions (0.70)
+- [x] ADR 0008 (Gemini, `mock`, discarded providers)
+- [x] With a real Gemini key (added during the phase): models checked, threshold calibrated (0.33), end-to-end check through the endpoint (A36)
+
+Pull request 2: urgency view (`feat/assistant-urgency-view`)
+- [x] Kafka listener (group `assistant-urgency-view`, manual acknowledgment after the script), Lua script with the rules of ADR 0021
+- [x] Rebuild from the earliest offset when `urgency:meta` is missing (when partitions are assigned, A38)
+- [x] `GET /asistente/estado-urgencias` with the five levels, the total and `actualizadoEn`
+- [x] Readiness with Redis; consumer side of the `traceparent` header (optional `correlationId`, A31)
 
 Modules: `triaxis-assistant-service`.
 
-Tests that must exist: sample questions 1 and 2 cite PROTO-001 and PROTO-002; question 3 (diabetes) returns the fixed notice with empty sources and the fake LLM is never invoked; invalid or unretrieved citation is rejected; breaker opens after failures and the endpoint answers 503; urgency view counts correct with duplicate events and out-of-order discharge; Redis view rebuilt from replay.
+Tests that must exist: sample questions 1 and 2 answer from and cite PROTO-001 and PROTO-002; question 3 (diabetes) returns the fixed notice with empty sources and the fake LLM is never invoked; an invalid or unretrieved citation and `NO_PROTOCOL` give the fixed notice; sources never come from model text; ingestion runs twice without duplicates and re-embeds on a model change; the breaker opens after failures and the endpoint answers 503, and a timeout counts as a failure; blank and too long questions give 400; 401, 403 and 200 per role; urgency view counts right with duplicate events, a missing registration, a discharge before the registration and a full replay; all five levels with zeros; BlockHound over the question flow and the listener; ArchUnit.
 
-Definition of done: `./gradlew :triaxis-assistant-service:test`.
-
-First commit: `feat(assistant): add RAG with validated citations and urgency view`
+Definition of done: `./gradlew build` passes, `scripts/check-docs.sh` passes, and a manual check with the compose infrastructure shows the three sample questions answered as expected with the `mock` provider and the urgency view following registrations and discharges made through triage.
 
 ## Phase 6: Operation report
 
@@ -343,6 +364,65 @@ One entry per finished piece of work: what was done, decisions taken, how it was
 - **Verified:** `./gradlew build` passes on JDK 21 (new tests: error format and the 401, 403, 413, 415 and 500 cases, protected metrics with and without credentials, access log content without bodies or tokens, audience, rate limit, trace id in the outbox and in Kafka headers). Manual check with the compose infrastructure: JSON logs carry `traceId` and `spanId`, a request with a `traceparent` header keeps its trace id through the outbox into the Kafka headers, Jaeger lists both services, the metrics endpoint answers 401 without or with wrong credentials and 200 with the right ones, and the local profile prints plain text logs.
 - **Found while testing:** a JUnit run once hung in a WebTestClient call that has no timeout; it did not reproduce in ten later runs. A default JUnit timeout of 120 seconds was added to the services so a hang fails with a stack trace instead of blocking.
 - **Not verified yet:** traces reaching Azure, the Prometheus scrape in a cluster, and the consumer side of the `traceparent` header (assistant, phase 5).
+
+### Phase 4: Escalation (done)
+
+- **What:** the domain rules `Patient.slaExceededAt`, `escalationDueAt` and `escalate` (strict limit, only `REGISTERED` and never escalated, status and `status_changed_at` unchanged); `PatientEvent.escalated`; the port `PatientRepository.escalateOverdue(now, limit)` with one atomic `UPDATE ... RETURNING` over a CTE with `FOR UPDATE SKIP LOCKED`, ordered by `registered_at, id`, and the status and flag checked again on the locked rows; `EscalateOverduePatientsUseCase`, which writes the flag, one audit entry (`ESCALATED`, actor `system`) and one `paciente_escalado` outbox event per patient in one unit of work, then increments `triage.escalations` by level; the `EscalationScheduler` input adapter (`triage.escalation.enabled`, `interval` PT30S, `batch-size` 100; cycles never overlap, a full batch starts another one, a failed cycle is logged and retried on the next tick).
+- **Decisions:** ADR 0006; assumptions A31 (escalation events carry no request trace) and A32 (both statuses of the event and audit entry are the current one). The escalation rows are read completely before the audit and outbox statements run on the same connection. MapStruct reads `Patient.escalate(Instant)` as a fluent setter, so the entity mapper ignores it explicitly.
+- **Tests:** domain (strict limit, statuses, already escalated, the escalation keeps the status); use case with fake ports (audit, event, metric, second run, oldest first and batch size, rollback when the audit or the event fails); PostgreSQL (escalated once and a second run does nothing, `EN_CONSULTA`, `ALTA` and escalated never selected, strict limit, order and batch size, flag, audit and outbox rolled back together, two concurrent runs escalate each of ten patients once, 25 rounds of a concurrent `PATCH` keep the audit order, the counter); Kafka (the event arrives with the level, both statuses and `escalado = true`); scheduler (full batches chained, a failed cycle does not stop the loop); BlockHound over the escalation; ArchUnit. Integration tests share one database, so each escalation test back-dates its patients to its own epoch, earlier than every previous one, and uses a fixed clock.
+- **Verified:** `./gradlew build` passes on JDK 21 (triage: 235 tests). Manual check with the compose PostgreSQL and Kafka, auth and triage running, an SLA of 1 minute for level 1 and an interval of 5 seconds: a critical patient registered through the API was escalated about 65 seconds later; the audit shows `REGISTERED` by `nurse` and `ESCALATED` by `system` with the same status before and after; the patient stays `REGISTRADO` with `status_changed_at` unchanged; both outbox rows were published; `kafka-console-consumer` shows `paciente_escalado` with `escalado: true`, the level and the patient id as key; a later `PATCH` to `EN_CONSULTA` works and `escalado` stays true.
+- **Not verified yet:** several replicas escalating at the same time on a real cluster (covered by the concurrent test only), and the alert reaction to the event (phase 7).
+
+### Phase 5, pull request 1: RAG (done)
+
+- **What:**
+  - **Corpus:** PROTO-001 to PROTO-003 as Markdown, word for word as in the specification, one section per chunk.
+  - **Ingestion:** idempotent (content hash and model). Validated at startup, embedded in the background with back-off (A37).
+  - **Persistence:** `protocol_chunks` in pgvector with an untyped vector, accessed with plain R2DBC (ADR 0002).
+  - **Use case:** question policy (1000 characters), retrieval gate, numbered excerpts, citation validator, sources from metadata (ADR 0007).
+  - **Providers:** `mock` (bag of words, extractive answer) and Gemini through the Spring AI starters (ADR 0008).
+  - **Resilience:** `ResilientLlmAdapter` with timeouts, the circuit breaker `llm`, and a 503 with `Retry-After` (ADR 0004).
+  - **Endpoint:** `POST /asistente/consulta` (`DOCTOR`), MapStruct mapper, shared error format, strict JSON.
+  - **Metrics:** `assistant.answers` and `assistant.llm.latency`.
+- **Decisions:** ADRs 0002, 0004, 0007 and 0008; assumptions A36 (thresholds `mock` 0.70, Gemini 0.33) and A37 (corpus at startup).
+- **Found while building:**
+  - **Spring AI:** the embedding connection auto-configuration of Spring AI ignores `spring.ai.model.embedding.text=none` and asks for credentials, so it is excluded unless the `gemini` profile is active.
+  - **Jackson:** it turns a number into text by default, so the coercion of numbers and booleans to text is disabled.
+  - **Ingestion:** embedding two sections at once dropped the second error when the provider failed, so sections are embedded one at a time.
+  - **BlockHound:** installing it in the middle of the test run broke the threads of the `parallel` scheduler and made timeouts hang. It is now installed when the test JVM starts (a JUnit `LauncherSessionListener`), so every assistant test runs under it.
+  - **The ignore rule:** `out/` also matched every source package named `out`, so the output ports and adapters of the auth service had never been committed and a fresh clone did not compile. It was fixed in its own pull request before this one (#28: the rule is now `/out/` and `/*/out/`).
+- **Verified:**
+  - **Build:** `./gradlew :triaxis-assistant-service:test` passes (92 tests).
+  - **`mock` against compose:** the corpus is stored (7 sections), and a second start embeds nothing.
+  - **`gemini` with an invalid key:** the service starts and the embedding is retried with back-off.
+  - **`gemini` with a real key, through the endpoint:**
+    - the five covered questions are answered from the right protocol and section, and diabetes gets the notice without a model call;
+    - three hard questions get the notice from the model: a drug the protocol does not name, a prompt injection asking for a dose, and the dose of a contraindicated drug;
+    - latency is about 1 second per answer, after turning off thinking (the first answer took 16.5 seconds with it).
+- **Not verified yet:** the urgency view (pull request 2), and the assistant in containers (phase 8).
+
+### Phase 5, pull request 2: urgency view (done)
+
+- **What:**
+  - **Listener:** asynchronous Kafka listener `UrgencyViewListener` in its own group `assistant-urgency-view`. It returns a `Mono` and acknowledges after Redis applied the event (ADR 0001), with at most 64 records in flight.
+  - **Store:** Lua script with the rules of ADR 0021 in `RedisUrgencyViewStore` (patient hashes, counters, metadata, 30-day discharged marker).
+  - **Rebuild:** from the beginning of the topic when partitions are assigned and the store is empty.
+  - **Endpoint:** `GET /asistente/estado-urgencias` (`NURSE`, `DOCTOR`) with `porNivel`, `total` and `actualizadoEn` (A35).
+  - **Readiness and metrics:** readiness with Redis; metric `assistant.urgency.events`.
+- **Decisions:** assumption A38 (invalid records are skipped and counted; rebuild only when partitions are assigned).
+- **Found while building:**
+  - **The Lua script:** BlockHound reported that a Redis script built from a resource reads the file again on a Redis I/O thread, so the script is read once at startup.
+  - **The rebuild:** a seek to the beginning while the asynchronous listener runs did not replay the records, and in the full suite it left the partition stopped. The rebuild happens only when partitions are assigned, and the test restarts the listener container.
+- **Verified:**
+  - **Build:** `./gradlew :triaxis-assistant-service:test` passes (112 tests).
+  - **Redis store:** duplicates, a missing registration, a discharge before the registration, the discharge marker with its expiry, counts per level, the newest time and the reset.
+  - **Listener:** duplicates and discharges, a patient seen only in consultation, invalid records skipped while later ones are applied, and a lost view rebuilt after a restart.
+  - **Endpoint:** shape and roles.
+  - **Manual check with the compose infrastructure, auth, triage and the assistant:**
+    - starting with an empty Redis rebuilt the view from the topic (the patient of the phase 4 check, still in consultation, was counted);
+    - three registrations and two discharges through triage were reflected in the view within seconds;
+    - a doctor reads the view, and a call without a token gets 401.
+- **Not verified yet:** several assistant replicas sharing the consumer group, and the services in containers (phase 8).
 
 ---
 

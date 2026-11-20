@@ -127,6 +127,8 @@ A1 to A4 come from `ARCHITECTURE.md` section 6.2. A5 onward were added while pre
 
 ## A19. Urgency view counts
 
+> **Superseded by A33** (ADR 0021). Kept for history.
+
 - **Ambiguity:** "active" patients are "all that are not in ALTA", but the view is built from events only.
 - **Decision:** `paciente_registrado` increments the level; `paciente_alta` decrements it; `paciente_en_consulta` and `paciente_escalado` do not change counts. The level never changes after registration, so the stored level is used on discharge. Unknown patients in a discharge event are ignored.
 - **Why:** keeps the Lua script small and idempotent.
@@ -201,3 +203,59 @@ A1 to A4 come from `ARCHITECTURE.md` section 6.2. A5 onward were added while pre
 - **Decision:** readiness includes the database and excludes Kafka, because the outbox keeps events when Kafka is down and the service can still register patients.
 - **Why:** a broker outage must not take every pod out of service.
 - **Impact if wrong:** adding Kafka to the readiness group is a one-line property change.
+
+## A31. Trace of an escalation
+
+- **Ambiguity:** the correlation id of an event is the trace id of the request that caused it (A26), but an escalation is started by the scheduler, not by a request.
+- **Decision:** escalation events have no request trace: the outbox row has no `correlation_id` or `traceparent`, and the Kafka message has only the `eventType` header. The audit entry records the actor `system`, and the scheduler logs how many patients it escalated.
+- **Why:** inventing a trace per cycle adds code without a caller to correlate with; the patient id (the message key) already links the escalation to the earlier events.
+- **Impact if wrong:** a consumer that requires `correlationId` must accept it as optional. Starting an observation per cycle would add a trace without changing the contract.
+
+## A32. Statuses in the escalation event and audit entry
+
+- **Ambiguity:** the event contract has `estadoAnterior` and `estadoNuevo`, but an escalation does not change the status.
+- **Decision:** both are the current status (`REGISTRADO`), and `escalado` is `true`. The audit entry also has the same previous and new status. Escalation never changes the status or the time of the last status change (A9).
+- **Why:** the fields stay non-null and true; a consumer can tell the escalation by `tipo` alone.
+- **Impact if wrong:** a consumer that expects `estadoAnterior` to be null for escalations needs a one-line change in the domain event factory.
+
+## A33. Urgency view counts (replaces A19)
+
+- **Ambiguity:** "active" patients are all that are not in `ALTA`, but the view is built from events only, and the specification does not say how it behaves with repeated, missing or late events. Our delivery is at least once (ADR 0005), and a rebuild replays the topic.
+- **Decision:** any event other than `paciente_alta` stores an unknown patient as active with the level of the event and adds one; `paciente_alta` marks the patient as discharged (subtracting one if it was active), and discharged is final; events of a known patient change nothing else. The discharged marker expires after 30 days, longer than the topic retention. See ADR 0021.
+- **Why:** the first rule (A19) did not count a patient whose registration was never seen, and could count a discharged patient again after a repeated registration. The new rule gives the right count in both cases.
+- **Impact if wrong:** a patient discharged and then registered again with the same id would not be counted; triage never reuses ids, so this cannot happen. Reclassification would need a new event type.
+
+## A34. Question validation and the fixed notice
+
+- **Ambiguity:** the specification asks for an explicit "no protocol available" answer, and for input validation, without the exact text or limits.
+- **Decision:** `pregunta` is required, not blank, and at most 1000 characters (400 naming `pregunta` otherwise). The fixed notice is `No existe un protocolo disponible para esta pregunta.`, with `fuentes: []` and HTTP 200 (A10). The same notice replaces an answer whose citations fail validation (A11).
+- **Why:** a bounded question keeps the prompt and the cost under control; one fixed text is easy to test and never contains clinical content.
+- **Impact if wrong:** the limit and the text are configuration and a constant.
+
+## A35. Response of the urgency view
+
+- **Ambiguity:** the specification asks for the number of active patients per level without a JSON shape.
+- **Decision:** `{ "porNivel": { "CRITICO": n, "URGENTE": n, "URGENTE_2": n, "NO_URGENTE": n, "NO_URGENTE_2": n }, "total": n, "actualizadoEn": "..." }`. All five levels are always present (zeros included); `actualizadoEn` is the time of the newest applied event, null when none.
+- **Why:** a client reads a level directly by its name; `actualizadoEn` shows how fresh the view is.
+- **Impact if wrong:** a different shape is a DTO change.
+
+## A36. Similarity threshold per embedding model
+
+- **Ambiguity:** the threshold must be calibrated with the embedding model, and it is different for each one.
+- **Decision:** one `assistant.rag.max-distance` per provider. `mock` (bag of words): 0.70; the relevant sections of the sample questions are at 0.47 and 0.60 and the closest section to the diabetes question at 0.82. `gemini` (`gemini-embedding-001`, 768 dimensions, task type `SEMANTIC_SIMILARITY`): 0.33, calibrated on 2026-11-19 with ten questions: six covered by the corpus (the two samples plus contraindications, qSOFA criteria and pediatric rehydration) are at most 0.29 from their section; four outside it (diabetes 0.45, myocardial infarction 0.38, paracetamol dose 0.38, asthma attack 0.37) are at least 0.37 away.
+- **Why:** the gate must refuse questions without a protocol before any model call; the value sits in the middle of the gap.
+- **Impact if wrong:** the gap is narrow (0.29 to 0.37), so a question close to the corpus but not covered by it may pass the gate; the prompt rule (`NO_PROTOCOL`) and the citation check still stop an invented answer. A new embedding model needs a new calibration; the threshold is a property.
+
+## A37. Loading the corpus at startup
+
+- **Ambiguity:** the specification asks for RAG over the corpus and a 503 when the LLM is unavailable, but not what happens when the provider is unavailable while the service starts, or when a protocol file is broken.
+- **Decision:** the protocol files are read and validated on the main thread before the service accepts traffic; a malformed or empty corpus stops the startup. The embedding of the sections runs in the background and is retried with back-off (2 seconds up to 1 minute, `assistant.corpus.retry.*`), one section at a time. Until the corpus is stored with the current embedding model, `POST /asistente/consulta` answers 503, never the "no protocol" notice. Readiness does not wait for the embedding.
+- **Why:** a broken corpus is a deployment error and must be seen at once; an unavailable provider is transient and must not take down the urgency view, which does not depend on the LLM. Answering "no protocol" while the corpus is missing would be false.
+- **Impact if wrong:** a deployment with a bad key starts and keeps retrying (visible in the logs and in the 503 answers) instead of failing; making readiness wait for the corpus is a health indicator change.
+
+## A38. Invalid records and rebuilds of the urgency view
+
+- **Ambiguity:** the specification says the view is built from the topic, not what to do with a record that is not a valid event, or when to rebuild the view.
+- **Decision:** a record that cannot be read as an event, or has no patient, level, type or time, is logged without its payload, counted (`assistant.urgency.events`, outcome `invalid`) and acknowledged, so it never blocks the partition. A Redis failure is retried with back-off until it works, so no valid event is lost. The view is rebuilt from the beginning of the topic only when the consumer gets its partitions and the store has no `urgency:meta` key, that is at startup or after a restart with a new or lost Redis.
+- **Why:** a poison message must not stop the view for every later event; a valid event must never be dropped. With asynchronous acknowledgments a seek while records are in flight does not replay them, so the rebuild happens before any record is processed.
+- **Impact if wrong:** a Redis lost while the service runs leaves the view empty until the next restart; a restart (or a rolling restart in Kubernetes) rebuilds it. An invalid event is not counted, which only happens if the contract is broken.
