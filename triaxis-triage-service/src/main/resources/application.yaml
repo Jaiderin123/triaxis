@@ -34,6 +34,18 @@ spring:
       # Do not wait long for the topic check when the broker is down.
       operation-timeout: 5s
       fail-fast: false
+    consumer:
+      # The alert listener has its own group (triage-escalation-alerts); offsets are committed after handling.
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      max-poll-records: 50
+      properties:
+        request.timeout.ms: 10000
+        default.api.timeout.ms: 15000
+    listener:
+      # Continues the trace of the request that caused the event (traceparent header).
+      observation-enabled: true
     producer:
       acks: all
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
@@ -123,6 +135,15 @@ triage:
     batch-size: 100
     # A batch of 100 is about 300 statements; 60 s leaves 200 ms per statement before the batch is rolled back.
     batch-timeout: PT60S
+  alerts:
+    # Alerts of escalated patients (RF-06, ADR 0011): log (default) or webhook (URL only from the environment).
+    channel: log
+    attempts: 3
+    backoff: PT1S
+    webhook:
+      url: ${ALERT_WEBHOOK_URL:}
+      connect-timeout: PT2S
+      response-timeout: PT5S
   outbox:
     relay:
       enabled: true
