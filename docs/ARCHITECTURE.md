@@ -443,15 +443,30 @@ Assumptions: waiting time is registration to the first (and only) transition int
 
 ### 6.8 Alerts to the medical team (RF-06, open requirement)
 
-**Proposal:** a Kafka-driven `AlertNotifier` port inside `triage-service`.
+**Decision (ADR 0011):** a Kafka-driven `AlertNotifier` port inside `triage-service`.
 
-- A separate consumer group subscribes to `triaje.eventos` and reacts to `paciente_escalado`.
-- Adapter `WebhookAlertNotifier` posts a small JSON message (compatible with Slack or Teams incoming webhooks) to a configurable URL. Default adapter: structured log, so the system works without any external account.
-- Retries with backoff; a failure to notify is counted (metric) and never affects the escalation itself.
+- A listener in its own consumer group (`triage-escalation-alerts`) reads `triaje.eventos` and reacts to `paciente_escalado`; other event types are acknowledged at once and invalid records are skipped and counted. It is asynchronous and acknowledges a record after handling it.
+- Adapters: `LoggingAlertNotifier` (default, `triage.alerts.channel: log`) and `WebhookAlertNotifier` (`webhook`, URL from `ALERT_WEBHOOK_URL`), which posts JSON with a `text` field (shown by Slack and Teams incoming webhooks) and the structured fields, with connect and response timeouts.
+- Content (A44): `pacienteId`, `nivel`, `slaMinutos`, `minutosEsperando` (from the registration to the escalation, read from the patient), `escaladoEn` and `ruta` (`/triage/pacientes/{id}`); no name, vital signs or complaint.
+- Delivery (A45): up to 3 attempts (1 s, 2 s, 4 s), then counted as failed and the next event goes on; a table `alert_deliveries (event_id PRIMARY KEY, patient_id, outcome, handled_at)` records every handled event, and an event already recorded is not sent again.
+- Metric `triage.alerts` by outcome (`sent`, `failed`, `duplicate`). The payload and the patient data are never logged.
 
-Why: alerting is a reaction to a domain event, so it is decoupled from the escalation transaction; it adds no fourth service; and it is testable with a fake webhook.
+Example of the webhook body:
 
-Alternatives considered (to document in the ADR): email through SMTP (needs infrastructure), Server-Sent Events stream (good demo, but only works within one replica unless fed from Kafka), a dedicated `notification-service` (cleanest separation, but more deployment cost).
+```json
+{
+  "text": "Paciente escalado: nivel CRITICO, 12 min de espera (SLA 5 min). Ver /triage/pacientes/3a1b...",
+  "tipo": "paciente_escalado",
+  "pacienteId": "3a1b...",
+  "nivel": "CRITICO",
+  "slaMinutos": 5,
+  "minutosEsperando": 12,
+  "escaladoEn": "2026-11-20T15:30:00Z",
+  "ruta": "/triage/pacientes/3a1b..."
+}
+```
+
+Alternatives considered (ADR 0011): email through SMTP, a Server-Sent Events stream, a dedicated `notification-service`, sending inside the escalation transaction, and retrying until the webhook answers.
 
 ### 6.9 API contract
 
@@ -656,6 +671,7 @@ Event types: `paciente_registrado`, `paciente_en_consulta`, `paciente_alta`, `pa
 | `triage.escalation.enabled`, `triage.escalation.interval`, `triage.escalation.batch-size`, `triage.escalation.batch-timeout` | triage | Escalation loop (defaults `true`, `PT30S`, `100`, `PT60S`), validated at startup |
 | `triage.administrative-complaints` | triage | Level 5 complaint list |
 | `triage.report.max-range` | triage | Longest range of the operation report (default `P31D`, phase 6) |
+| `triage.alerts.channel` (`log` or `webhook`), `ALERT_WEBHOOK_URL`, `triage.alerts.webhook.connect-timeout`, `response-timeout`, `triage.alerts.attempts`, `triage.alerts.backoff` | triage | Alerts of escalated patients (defaults `log`, 2 s, 5 s, 3 attempts, 1 s doubling; phase 7) |
 | `triage.outbox.relay.*` (including `send-timeout` 15 s, `cycle-budget` 30 s and `cycle-timeout` 60 s, validated so that the timeout exceeds budget plus send), `triage.outbox.topic.*` | triage | Relay loop and topic creation |
 | `TRIAGE_DB_URL`, `TRIAGE_DB_USER`, `TRIAGE_DB_PASSWORD` | triage | PostgreSQL (R2DBC) |
 | `KAFKA_BOOTSTRAP_SERVERS` | triage, assistant | Kafka |
@@ -738,7 +754,7 @@ Status `written` means the file exists in `docs/adr/` (checked by `scripts/check
 | 0008 | Gemini for LLM and embeddings; Ollama and DeepSeek discarded | written |
 | 0009 | Spring Boot 3.5 / Spring AI 1.1 out of OSS support, chosen on purpose | written |
 | 0010 | Deployment strategy and cost control on Azure | pending (deployment) |
-| 0011 | Alert channel for escalated patients | pending (alerts) |
+| 0011 | Alert channel for escalated patients | written |
 | 0012 | Functional endpoints (`RouterFunction`) instead of annotated controllers | written |
 | 0013 | Who may change a patient's state (`NURSE` and `DOCTOR`), an ambiguity of the specification | written |
 | 0014 | Clinical audit trail: append-only table written in the same transaction, with the actor | written |

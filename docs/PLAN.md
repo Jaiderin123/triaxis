@@ -15,7 +15,7 @@ Working checklist. Follow the phases in order; tick boxes as work lands. Source 
 | 5 Assistant | done | `phase-5-assistant` |
 | Review fixes of 2026-11-19 (between phases 5 and 6) | done | `review-2026-11-19` |
 | 6 Operation report | done | `phase-6-report` |
-| 7 Alerts | next | |
+| 7 Alerts | next (planned) | |
 | 8 Deployment | pending | |
 | 9 Docs | pending | |
 
@@ -35,9 +35,11 @@ Every pull request of phases 6 to 9 checks, in addition to the build and `script
 
 ### Where to resume (phase 7)
 
+State on 2026-11-20: phases 0 to 6 and the review fixes are released to `main` (tags up to `phase-6-report`); `main` and `develop` have the same content and are protected (pull request required, no direct or force pushes). Phase 7 is **planned and not started**: next step is to create `feat/phase-7-alerts` from `develop` and begin with the tests of the domain and application (first task of the Phase 7 section). After phase 7: phase 8 (deployment, with the tasks moved there by the review) and phase 9 (docs). The accepted debt is in "Improvements" at the end of this file.
+
 Phase 6 is released to `main` (tag `phase-6-report`). Next is phase 7, the alerts to the medical team (RF-06, an open requirement):
 
-- Plan it first and record the approved decisions in the Phase 7 section before writing code. The proposal is in `ARCHITECTURE.md` section 6.8 (a Kafka listener in its own consumer group inside triage, an `AlertNotifier` port with a log adapter by default and a webhook adapter) and ASSUMPTIONS A14; ADR 0011 is due.
+- The phase is planned: the approved decisions are in the Phase 7 section below (ADR 0011, A44, A45). Start with `feat/phase-7-alerts` from `develop`; the design is in `ARCHITECTURE.md` section 6.8.
 - The listener follows the rules learned in phase 5: asynchronous with acknowledgment after success, invalid records skipped and counted, bounded retries, a timeout on the webhook call, and the payload never logged.
 - Conventions: the definition of done of phases 6 to 9 above; the route rule test; UTC sessions; no secrets in the repository; check that a fresh clone compiles.
 - Documentation sync: follow the checklist in `CLAUDE.md` and run `scripts/check-docs.sh` before each pull request.
@@ -266,14 +268,33 @@ First commit: `feat(triage): add hourly operation report with window functions`
 
 **Goal:** the medical team is alerted when a patient is escalated.
 
+Decisions (approved, not started yet; ADR 0011, A44, A45):
+- One branch `feat/phase-7-alerts` from `develop`, one pull request, then the release to `main` and the tag `phase-7-alerts`.
+- Channels: `LoggingAlertNotifier` (default) and `WebhookAlertNotifier` (`ALERT_WEBHOOK_URL`, JSON with `text` for Slack and Teams plus the structured fields), selected with `triage.alerts.channel`.
+- Content: the minimum, without name, vital signs or complaint (A44).
+- Duplicates: a table `alert_deliveries` with the event id as the key; an event already handled is not sent again (A45).
+- Failures: 3 attempts (1 s, 2 s, 4 s), then counted as failed and the next event goes on (A45).
+- An asynchronous listener in its own group `triage-escalation-alerts`, acknowledged after handling; other event types acknowledged at once; invalid records skipped and counted; a timeout on the webhook call; the payload never logged; metric `triage.alerts` by outcome.
+
 Tasks
-- [ ] `AlertNotifier` port; `LoggingAlertNotifier` (default) and `WebhookAlertNotifier` (configurable URL)
-- [ ] Kafka listener in its own consumer group for `paciente_escalado`, retry with backoff, failure counted and never propagated
-- [ ] ADR 0011 (alert channel)
+- [ ] Domain and application: the alert (built from the escalation event and the registration time), the `AlertNotifier` and `AlertDeliveryStore` ports, `NotifyEscalationUseCase` (duplicate check, bounded retries, record of the outcome); unit tests first
+- [ ] Persistence: `alert_deliveries` in the idempotent schema and its R2DBC adapter
+- [ ] Adapters: `LoggingAlertNotifier` and `WebhookAlertNotifier` (`WebClient` with timeouts), selected by `triage.alerts.channel`; settings validated and documented in `ARCHITECTURE.md` section 10
+- [ ] Kafka listener in the group `triage-escalation-alerts` (consumer settings of triage)
+- [ ] Documentation and a manual check with the compose infrastructure and a local webhook receiver
 
-Tests: escalated event triggers one notification; webhook failure is retried and counted; fake webhook server receives the JSON.
+Tests that must exist:
+- An escalated event gives exactly one notification with the minimal content and no name.
+- The same event delivered twice gives one notification and one `duplicate`.
+- A webhook that fails twice and then answers gives one notification after the retries.
+- A webhook that keeps failing is counted as `failed` and the next event is still sent.
+- A slow webhook is cut by the timeout.
+- A fake HTTP server receives the JSON (the `text` and the fields).
+- Other event types and invalid records do not notify.
+- An end-to-end path from a real escalation through the outbox and Kafka to the fake webhook.
+- The flow under BlockHound, and the escalation is unaffected when the channel fails.
 
-Definition of done: `./gradlew :triaxis-triage-service:test --tests '*Alert*'`.
+Definition of done: `./gradlew build` and `scripts/check-docs.sh` pass, a fresh clone compiles, the checklist of phases 6 to 9 is met, and a manual check shows an alert in the log and at a local webhook after a real escalation.
 
 First commit: `feat(triage): notify the medical team of escalated patients`
 
@@ -523,6 +544,7 @@ From the review of 2026-11-19 (report in `docs/private/reviews/`, not versioned)
 - Deterministic race tests: force both interleavings of a concurrent `PATCH` and the escalation (held transactions), and replace the remaining `Thread.sleep` polling with controllable schedulers.
 - Tests for auth: the use case `IssueTokenService` with fakes, the address limit on a real endpoint, the type of the decoder errors; BlockHound explicitly over the outbox relay.
 - A dependency scanner (OWASP Dependency-Check, Dependabot or Trivy); it is a new dependency and needs approval.
+- A test that the access log line carries the `traceId` (ADR 0019 promises it in every log line; not verified for the access log).
 - From the re-review of the fixes:
   - transient database errors (`statement_timeout`, `lock_timeout`, pool exhausted) answer 500 in triage instead of 503;
   - `assistant.rag.search-timeout` (3 s) is shorter than `statement_timeout` (10 s), so a cancelled search keeps its connection busy until the server stops it;
