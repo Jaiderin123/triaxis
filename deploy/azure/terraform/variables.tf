@@ -22,9 +22,9 @@ variable "cluster_name" {
 }
 
 variable "node_size" {
-  description = "Size of the single node: 2 vCPU and 8 GiB is the cheapest size that fits the services, Kafka, PostgreSQL and Redis."
+  description = "Size of the single node: 2 vCPU and 8 GiB fit the services, Kafka, PostgreSQL and Redis. The B-series is not offered to the free trial subscription, so the default is the cheapest size of 2 vCPU and 8 GiB that is (ADR 0010)."
   type        = string
-  default     = "Standard_B2ms"
+  default     = "Standard_D2as_v7"
 }
 
 variable "node_os_disk_gb" {
