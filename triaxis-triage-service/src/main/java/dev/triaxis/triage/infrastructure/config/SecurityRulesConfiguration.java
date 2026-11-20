@@ -14,7 +14,8 @@ class SecurityRulesConfiguration {
 		return exchanges -> exchanges
 				.pathMatchers(HttpMethod.POST, "/triage/pacientes").hasRole("NURSE")
 				.pathMatchers(HttpMethod.PATCH, "/triage/pacientes/*/estado").hasAnyRole("NURSE", "DOCTOR")
-				.pathMatchers(HttpMethod.GET, "/triage/pacientes/*").hasAnyRole("NURSE", "DOCTOR");
+				.pathMatchers(HttpMethod.GET, "/triage/pacientes/*").hasAnyRole("NURSE", "DOCTOR")
+				.pathMatchers(HttpMethod.GET, "/triage/reportes/operacion").hasRole("DOCTOR");
 	}
 
 }
