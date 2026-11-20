@@ -64,7 +64,7 @@ The name must be checked on GitHub and Google before publishing, to avoid clashi
 | Health | Spring Boot Actuator: liveness and readiness probes |
 | Metrics | Micrometer with a Prometheus endpoint protected by HTTP Basic: classification counts per level, outbox, escalations, LLM latency |
 | Logging | Spring Boot structured logging, ECS JSON on the console, with the trace id; plain text in the `local` profile |
-| Tracing | OpenTelemetry through Micrometer Tracing (`micrometer-tracing-bridge-otel` and the OTLP exporter, versions from the Spring Boot BOM); Jaeger locally |
+| Tracing | OpenTelemetry through Micrometer Tracing (`micrometer-tracing-bridge-otel` and the OTLP exporter, versions from the Spring Boot BOM); Jaeger `jaegertracing/jaeger:2.4.0` locally |
 | Authentication | JWT, RS256, issued by `auth-service`; validated by the other services through the public key (JWKS) |
 | Secrets | Environment variables only. Nothing hardcoded or committed |
 
@@ -78,7 +78,9 @@ The name must be checked on GitHub and Google before publishing, to avoid clashi
 | Coverage | JaCoCo |
 | Mapping | MapStruct **1.6.3** (latest stable; 1.7 is still beta) | Generated mappers at the boundaries: DTO to command, entity to domain, domain to response |
 | Architecture rules | ArchUnit **1.5.1**: enforces the hexagonal dependency rules (domain, application, infrastructure) |
-| Non-blocking proof | BlockHound **1.0.18.RELEASE**: fails a test if a blocking call runs on an event-loop thread |
+| Non-blocking proof | BlockHound **1.0.18.RELEASE**: fails a test if a blocking call runs on an event-loop thread (in the assistant it is installed when the test JVM starts) |
+| Test fixtures | The core Gradle plugin `java-test-fixtures` in `triaxis-security` shares `RouteInventory` with the services (no new library) |
+| Time zone of the tests | Every test JVM runs in `America/Bogota` (`user.timezone`), so code that depends on the JVM zone fails |
 | Redis in tests | Testcontainers generic Redis container (`redis` image, pinned tag); no extra library |
 
 ## 7. Packaging and deployment
@@ -96,7 +98,7 @@ The name must be checked on GitHub and Google before publishing, to avoid clashi
 Do **not** pin versions already managed by the Spring Boot BOM (Spring Kafka, Spring Data Redis, R2DBC driver, Reactor, Micrometer, Spring Security, Testcontainers).
 
 Pin explicitly only:
-1. The Spring Boot Gradle plugin (3.5.16).
+1. The Spring Boot Gradle plugin (3.5.16) and the `io.spring.dependency-management` plugin (1.1.7).
 2. The Spring AI BOM.
 3. Resilience4j.
 4. ArchUnit, BlockHound and MapStruct (checked: none is managed by the Spring Boot 3.5.16 BOM).
@@ -110,16 +112,9 @@ BlockHound on JDK 13+ needs the JVM flag `-XX:+AllowRedefinitionToAddDeleteMetho
 - External contract (paths, JSON fields, event names, state and level values): **Spanish**, exactly as specified (`/triage/pacientes`, `nivel`, `slaMinutos`, `REGISTRADO`, `paciente_registrado`, `triaje.eventos`).
 - Internal domain model in English, mapped to the external contract at the boundary (DTOs / enums with an external value).
 
-## 10. Decisions to record as ADRs
+## 10. Decisions recorded as ADRs
 
-1. Spring Kafka instead of Reactor Kafka (Reactor Kafka discontinued in May 2025).
-2. Custom R2DBC repository for vectors instead of Spring AI `PgVectorStore` (blocking JDBC).
-3. Separate identity service (JWT RS256 + JWKS) and what replaces it in production (Entra ID or Keycloak).
-4. Degraded mode of the assistant (circuit breaker, 503) and why Triage never depends on it.
-5. Gemini for LLM and embeddings, `mock` profile, and discarded alternatives (Ollama, DeepSeek).
-6. Spring Boot 3.5 / Spring AI 1.1 out of OSS support, chosen on purpose, migration path to Boot 4 / Spring AI 2.
-7. Azure deployment strategy and cost control.
-8. Alert channel for escalated patients.
+The stack decisions are recorded in `docs/adr/`: Spring Kafka (0001), the custom R2DBC vector repository (0002), the identity service (0003), the degraded mode of the assistant (0004), Gemini with the `mock` provider (0008), Spring Boot 3.5 and Spring AI 1.1 (0009), and the defaults of the review (0022: deny by default, bounded waits, UTC sessions). Still to write: the Azure deployment and cost control (0010, phase 8) and the alert channel (0011, phase 7). The full list and status are in `ARCHITECTURE.md` section 14.
 
 ## 11. Open items
 

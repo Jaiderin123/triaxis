@@ -13,7 +13,7 @@ The requirements specification asks for authentication, input validation and no 
 - **Audience:** the auth service adds `aud` to every token (`auth.jwt.audience`, default `triaxis`) and the resource servers reject tokens without it (`triaxis.security.audience`). This complements ADR 0003.
 - **Body size:** `spring.codec.max-in-memory-size` is 64 KB. A larger body answers 413 in the standard format.
 - **Rate limit on `POST /auth/token`:** at most 10 attempts per minute per username and per client address (fixed window, in memory; configurable). The 11th answers 429 with `Retry-After`. With several replicas each one limits on its own, and behind a proxy the address is the proxy's, so the per-username limit is the main protection.
-- **Metrics endpoint:** `/actuator/prometheus` requires HTTP Basic with credentials from `METRICS_USER` and `METRICS_PASSWORD` (a Kubernetes Secret in deployment). Without a password the endpoint is denied to everybody. The Ingress does not route `/actuator`. Health probes stay public. No other actuator endpoint is exposed.
+- **Metrics endpoint:** `/actuator/prometheus` requires HTTP Basic with credentials from `METRICS_USER` and `METRICS_PASSWORD` (a Kubernetes Secret in deployment). Without a password the endpoint is denied to everybody. The Ingress of the deployment must not route `/actuator` (a task of phase 8). Health probes stay public. No other actuator endpoint is exposed.
 - **Errors and logs:** answers never include stack traces or internal messages for unexpected errors, 401 and 403 are generic, and logs never contain bodies, tokens or passwords.
 - **Also in place:** strict JSON (no silent conversion of types), BCrypt for passwords, a dummy hash for unknown users, RS256 only, secrets only from the environment.
 

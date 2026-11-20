@@ -2,7 +2,7 @@
 
 A log of every place where the requirements specification is silent or ambiguous, the decision taken, and what changes if the decision is wrong. "The requirements specification" is the original brief; [`ARCHITECTURE.md`](ARCHITECTURE.md) is the design that applies these decisions. Add new entries at the end and never reuse an ID.
 
-A1 to A4 come from `ARCHITECTURE.md` section 6.2. A5 onward were added while preparing the plan.
+A1 to A4 come from `ARCHITECTURE.md` section 6.2. A5 onward were added while preparing the plan. A15 and A21 were drafted and dropped before they were needed; their IDs are not reused.
 
 ---
 
@@ -23,7 +23,7 @@ A1 to A4 come from `ARCHITECTURE.md` section 6.2. A5 onward were added while pre
 ## A3. Administrative complaint matching
 
 - **Ambiguity:** the specification says the complaint "belongs to the list" without defining matching.
-- **Decision:** normalized exact equality (lowercase, accents removed, trimmed). The list is configurable (`triage.administrative-complaints`). Matching is not "contains".
+- **Decision:** normalized exact equality (lowercase, accents removed, trimmed, and runs of inner spaces reduced to one). The list is configurable (`triage.administrative-complaints`). Matching is not "contains".
 - **Why:** a clinical complaint that merely mentions "seguimiento" must not be downgraded to level 5.
 - **Impact if wrong:** a free-text complaint such as "renovacion de recetario cronico" would stay at level 4 instead of 5. Safe direction (higher priority), tracked as open decision 4 in `ARCHITECTURE.md`.
 
@@ -86,14 +86,14 @@ A1 to A4 come from `ARCHITECTURE.md` section 6.2. A5 onward were added while pre
 ## A12. Time zone and clock handling
 
 - **Ambiguity:** not specified.
-- **Decision:** all timestamps are stored as `TIMESTAMPTZ`, handled in UTC, and returned in ISO 8601 with `Z`. The R2DBC session time zone is UTC. Time always comes from a `Clock` port. Hourly buckets are UTC hours.
+- **Decision:** all timestamps are stored as `TIMESTAMPTZ`, handled in UTC, and returned in ISO 8601 with `Z`. The R2DBC session time zone is UTC, set by a connection customizer, and the tests run in a non-UTC JVM (ADR 0022). Time always comes from a `Clock` port. Hourly buckets are UTC hours.
 - **Why:** removes daylight-saving and server-locale effects and makes SLA tests deterministic.
 - **Impact if wrong:** clients in Colombia (UTC-5) see buckets shifted by whole hours; since the offset is a whole number of hours, bucket boundaries still align.
 
 ## A13. Event message format and versioning
 
 - **Ambiguity:** the specification leaves the format free ("JSON, Avro, etc.; document it").
-- **Decision:** JSON on topic `triaje.eventos` (3 partitions, key = patient id). Field names are Spanish (`idEvento`, `tipo`, `version`, `ocurridoEn`, `pacienteId`, `nivel`, `estadoAnterior`, `estadoNuevo`, `slaMinutos`, `escalado`). `version: 1` is in every payload; headers `correlationId` and `eventType`. Delivery is at least once and consumers are idempotent. Every event carries the patient level so the urgency view needs no extra call.
+- **Decision:** JSON on topic `triaje.eventos` (3 partitions, key = patient id). Field names are Spanish (`idEvento`, `tipo`, `version`, `ocurridoEn`, `pacienteId`, `nivel`, `estadoAnterior`, `estadoNuevo`, `slaMinutos`, `escalado`). `version: 1` is in every payload; headers `correlationId`, `traceparent` and `eventType` (escalation events only `eventType`, A31). Delivery is at least once and consumers are idempotent. Every event carries the patient level so the urgency view needs no extra call.
 - **Why:** simple to inspect and test, no schema registry needed.
 - **Impact if wrong:** moving to Avro needs a registry and a new module dependency; the `version` field leaves room for compatible evolution.
 
@@ -109,7 +109,7 @@ A1 to A4 come from `ARCHITECTURE.md` section 6.2. A5 onward were added while pre
 - **Ambiguity:** the specification asks for a deployed, reachable system but does not say whether it must use a real LLM.
 - **Decision:** not decided. Local and test runs use the `mock` profile. For the deployed environment either keep `mock` (no key, no cost, deterministic) or enable Gemini through a Kubernetes Secret. To be chosen in phase 8 and recorded in ADR 0008 or 0010.
 - **Why:** a real model shows the RAG working, but adds a secret, cost and a failure point.
-- **Impact if wrong:** a reviewer may expect real generated answers; or a missing key may break the demo.
+- **Impact if wrong:** a client may expect real generated answers; or a missing key may break the demo.
 
 ## A17. Who may change a patient's state
 
@@ -123,7 +123,7 @@ A1 to A4 come from `ARCHITECTURE.md` section 6.2. A5 onward were added while pre
 - **Ambiguity:** "basic authentication (JWT or API key)" without details.
 - **Decision:** JWT RS256 from a separate `auth-service`, short-lived (15 minutes), no refresh tokens, no registration. Request fields are `username` and `password`; the response follows OAuth2 names (`access_token`, `token_type`, `expires_in`) because authentication is not part of the Spanish domain contract. Bad credentials return 401 with a generic message. Users come from configuration with BCrypt hashes; the repository only holds demonstration users for the local profile. The signing key comes from `JWT_PRIVATE_KEY`, and a key is generated only when `auth.jwt.generate-key-if-missing=true`. `auth-service` does not depend on `triaxis-security`.
 - **Why:** shows the validation path through JWKS without an external identity provider, and avoids shared secrets. See ADR 0003.
-- **Impact if wrong:** none for the evaluation; the resource servers do not change when the issuer changes. Switching to Spanish field names is a DTO change.
+- **Impact if wrong:** none for the current scope; the resource servers do not change when the issuer changes. Switching to Spanish field names is a DTO change.
 
 ## A19. Urgency view counts
 
@@ -146,7 +146,7 @@ A1 to A4 come from `ARCHITECTURE.md` section 6.2. A5 onward were added while pre
 - **Ambiguity:** RN-04 lists the fields to record but not who made the change.
 - **Decision:** `patient_audit` also stores `actor`: the JWT `sub` of the caller, or `system` for the escalation scheduler. See ADR 0014.
 - **Why:** both roles can change a patient's state (ADR 0013) and a clinical audit without an author is of little use.
-- **Impact if wrong:** an extra column; it is easy to ignore if a reviewer does not want it.
+- **Impact if wrong:** an extra column; it is easy to ignore if it is not wanted.
 
 ## A23. Validation lives in the domain
 
@@ -188,12 +188,12 @@ A1 to A4 come from `ARCHITECTURE.md` section 6.2. A5 onward were added while pre
 - **Ambiguity:** the specification asks for authentication and input validation only.
 - **Decision:** tokens carry and require `aud` = `triaxis`; request bodies are limited to 64 KB; the token endpoint allows 10 attempts per minute per username and per address; sensitive data is never logged. See ADR 0020.
 - **Why:** reasonable defaults that protect the API without making it hard to use.
-- **Impact if wrong:** the values are configuration (`auth.jwt.audience`, `spring.codec.max-in-memory-size`, `auth.rate-limit.*`).
+- **Impact if wrong:** the values are configuration (`auth.jwt.audience`, `spring.codec.max-in-memory-size`, `auth.rate-limit.*`). Known limit: the attempts are counted before the password is checked, and behind a proxy every client shares one address, so the limit per address becomes global. Counting only failures and the forwarded address of a trusted proxy is a task of phase 8.
 
 ## A29. Protected metrics endpoint
 
 - **Ambiguity:** the specification asks for Micrometer metrics, not for how they are exposed or protected.
-- **Decision:** `/actuator/prometheus` is exposed with HTTP Basic using `METRICS_USER` and `METRICS_PASSWORD` from the environment; without a password it is denied. The ingress does not route `/actuator`. Only health, info and Prometheus are exposed.
+- **Decision:** `/actuator/prometheus` is exposed with HTTP Basic using `METRICS_USER` and `METRICS_PASSWORD` from the environment; without a password it is denied. The ingress of the deployment must not route `/actuator` (phase 8). Only health, info and Prometheus are exposed.
 - **Why:** metrics reveal internals, so they are not left open, and a scraper can use Basic credentials from a Secret.
 - **Impact if wrong:** a management port or a network-level restriction can replace it without changing the metrics.
 
@@ -256,9 +256,9 @@ A1 to A4 come from `ARCHITECTURE.md` section 6.2. A5 onward were added while pre
 ## A38. Invalid records and rebuilds of the urgency view
 
 - **Ambiguity:** the specification says the view is built from the topic, not what to do with a record that is not a valid event, or when to rebuild the view.
-- **Decision:** a record that cannot be read as an event, or has no patient, level, type or time, is logged without its payload, counted (`assistant.urgency.events`, outcome `invalid`) and acknowledged, so it never blocks the partition. A Redis failure is retried with back-off until it works, so no valid event is lost. The view is rebuilt from the beginning of the topic only when the consumer gets its partitions and the store has no `urgency:meta` key, that is at startup or after a restart with a new or lost Redis.
+- **Decision:** a record that cannot be read as an event, or has no patient, level, type or time, is logged without its payload, counted (`assistant.urgency.events`, outcome `invalid`) and acknowledged, so it never blocks the partition. A Redis failure is retried with back-off until it works, so no valid event is lost. The view is rebuilt from the beginning of the topic only when the consumer gets its partitions and the store has no `urgency:initialized` key (written only by the reset before a replay, ADR 0022), that is at startup or after a restart with a new or lost Redis.
 - **Why:** a poison message must not stop the view for every later event; a valid event must never be dropped. With asynchronous acknowledgments a seek while records are in flight does not replay them, so the rebuild happens before any record is processed.
-- **Impact if wrong:** a Redis lost while the service runs leaves the view empty until the next restart; a restart (or a rolling restart in Kubernetes) rebuilds it. An invalid event is not counted, which only happens if the contract is broken.
+- **Impact if wrong:** a Redis lost while the service runs shows only the events received after the loss until the next restart; a restart (or a rolling restart in Kubernetes) rebuilds it, even if events arrived in between. When Redis does not answer at partition assignment, the check is retried and the listener restarted later. An invalid event is not counted, which only happens if the contract is broken.
 
 ## A39. The assistant runs as a single replica
 
@@ -266,4 +266,11 @@ A1 to A4 come from `ARCHITECTURE.md` section 6.2. A5 onward were added while pre
 - **Decision:** the assistant runs as **one replica** (`replicas: 1` in the Kubernetes manifests of phase 8). Triage and auth may run several. A negative count, which only a broken store or concurrent rebuilds could produce, is read as zero, logged and counted (`assistant.urgency.negative.counts`) instead of failing the read.
 - **Why:** coordinating a rebuild across replicas needs a distributed lock and an atomic swap of the view; one replica is enough for the expected load, and a restart takes seconds.
 - **Impact if wrong:** with two replicas, a rebuild can drop or double count the patients of some partitions until the next rebuild. Scaling out needs a coordinated rebuild first (listed in the improvements of `PLAN.md`).
+
+## A40. The SLA is fixed when the patient is registered
+
+- **Ambiguity:** the SLA per level is configurable (RN-02), but the specification does not say whether a new value applies to patients who are already waiting.
+- **Decision:** the SLA in minutes is stored with each patient at registration (`patients.sla_minutes`); a change of `triage.sla.minutes.*` applies to new patients only.
+- **Why:** the escalation of a patient must not move because the configuration changed while the patient waited, and the event and the audit keep the value that was applied.
+- **Impact if wrong:** applying a new SLA to waiting patients needs the escalation statement to read the current value per level instead of the stored one.
 
