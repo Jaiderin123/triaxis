@@ -543,8 +543,10 @@ The assistant **never calls the triage API**. A consumer in its own group (`assi
 | `paciente_alta` | store as discharged, no count change | mark discharged, subtract 1 | no change |
 
 - Discharged is final; its key expires after `assistant.urgency.discharged-ttl` (30 days, longer than the topic retention), so a replay never counts a discharged patient again.
-- Offsets are committed only after the script succeeds (manual ack). Duplicates, replays and a late start are harmless.
-- If Redis is lost (no `urgency:meta` key at startup), the consumer reads the topic again from the earliest offset and the same rules rebuild the counts.
+- The listener (`UrgencyViewListener`) is asynchronous, as ADR 0001 says: it returns a `Mono` and acknowledges a record only after the script succeeded, so offsets are committed only for applied events. Records may be applied out of order, which the rules allow. At most `assistant.urgency.max-in-flight` (64) records are in flight; a Redis failure is retried with back-off until it works; a record that is not a valid event is logged (without its payload), counted and skipped (ASSUMPTIONS A38).
+- If Redis is lost (no `urgency:meta` key), the consumer reads the topic again from the earliest offset when its partitions are assigned, at startup or after a restart, before it processes any record, and the same rules rebuild the counts. The view is not rebuilt while the consumer runs: with asynchronous acknowledgments a seek does not replay the records.
+- The Lua script is read once at startup (`redis/urgency-apply.lua`); a script built from a resource reads the file again on a Redis I/O thread, which BlockHound reported.
+- Metric `assistant.urgency.events` by outcome (`applied`, `unchanged`, `invalid`). The listener continues the trace of the `traceparent` header (Kafka observation); `correlationId` is optional (A31).
 
 `GET /asistente/estado-urgencias` returns all five levels (zeros included), a total and the time of the newest applied event:
 
@@ -614,7 +616,7 @@ Event types: `paciente_registrado`, `paciente_en_consulta`, `paciente_alta`, `pa
 **Observability (ADR 0019).**
 - Traces: OpenTelemetry through Micrometer Tracing, with Reactor context propagation. The trace id is the correlation id: it is in every log line, in the error bodies, in the outbox row and in the Kafka headers `correlationId` and `traceparent`. Export to an OTLP endpoint is optional (`TRACING_EXPORT_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`); Jaeger runs in the local compose file.
 - Logs: Spring Boot structured logging, ECS JSON on the console (plain text in the `local` profile). Logs go to standard output and are collected by the platform; they are not stored in the database (the clinical audit is a separate table). One access-log line per request (method, path, status, duration, user), never bodies or tokens.
-- Metrics (Micrometer, Prometheus format, common tag `application`): `triage.classification` by level, `triage.outbox.pending`, `triage.outbox.published`, `triage.outbox.failures`, `triage.escalations` by level, `assistant.llm.latency` (tags `operation` `embedding` or `answer`, `outcome` `success`, `failure` or `rejected`), `assistant.answers` by outcome (`answered`, `no_protocol`, `rejected`, `degraded`) and the circuit breaker state from Resilience4j. `/actuator/prometheus` needs HTTP Basic (ADR 0020).
+- Metrics (Micrometer, Prometheus format, common tag `application`): `triage.classification` by level, `triage.outbox.pending`, `triage.outbox.published`, `triage.outbox.failures`, `triage.escalations` by level, `assistant.llm.latency` (tags `operation` `embedding` or `answer`, `outcome` `success`, `failure` or `rejected`), `assistant.answers` by outcome (`answered`, `no_protocol`, `rejected`, `degraded`), `assistant.urgency.events` by outcome (`applied`, `unchanged`, `invalid`) and the circuit breaker state from Resilience4j. `/actuator/prometheus` needs HTTP Basic (ADR 0020).
 - Health: liveness state only for liveness; readiness of the triage service is the readiness state plus the database, and deliberately not Kafka (the outbox absorbs an outage). The assistant adds its database and Redis. Shutdown is graceful.
 
 **Security hardening (ADR 0020).** Audience claim check, 64 KB body limit, rate limit on the token endpoint, strict JSON, protected metrics, no actuator endpoint except health, info and Prometheus, and no internal detail in answers or logs.
@@ -640,7 +642,7 @@ Event types: `paciente_registrado`, `paciente_en_consulta`, `paciente_alta`, `pa
 | `assistant.rag.question-max-length`, `assistant.corpus.location`, `assistant.corpus.retry.*` | assistant | Question limit (1000), protocol folder, back-off of the corpus embedding |
 | `assistant.llm.timeout.*`, `resilience4j.circuitbreaker.instances.llm.*` | assistant | Timeouts (embedding 5 s, answer 20 s, `Retry-After` 30 s) and circuit breaker of the LLM calls (ADR 0004) |
 | `ASSISTANT_DB_URL`, `ASSISTANT_DB_USER`, `ASSISTANT_DB_PASSWORD` | assistant | PostgreSQL with pgvector (R2DBC) |
-| `REDIS_HOST`, `REDIS_PORT`, `assistant.urgency.discharged-ttl` | assistant | Urgency view (phase 5) |
+| `REDIS_HOST`, `REDIS_PORT`, `assistant.urgency.discharged-ttl`, `assistant.urgency.max-in-flight`, `assistant.urgency.redis-timeout` | assistant | Urgency view: Redis, discharged marker (30 days), records in flight (64), Redis timeout (2 s) |
 
 **Backpressure.** Kafka consumers use `max.poll.records` and a bounded `flatMap` concurrency; the outbox relay works in batches; R2DBC pool sizes and WebClient timeouts are explicit.
 

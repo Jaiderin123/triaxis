@@ -11,27 +11,20 @@ Working checklist. Follow the phases in order; tick boxes as work lands. Source 
 | 2 Triage core | done | `phase-2-triage-core` |
 | 3 Events (outbox) | done | `phase-3-events` |
 | Platform foundation (errors, observability, hardening) | done | `platform-foundation` |
-| 4 Escalation | in review (pull request to `develop`; tag `phase-4-escalation` after the release) | |
-| 5 Assistant | in progress (RAG merged; urgency view next) | |
+| 4 Escalation | done (release to `main` pending) | |
+| 5 Assistant | done (release to `main` pending) | |
 | 6 Operation report | pending | |
 | 7 Alerts | pending | |
 | 8 Deployment | pending | |
 | 9 Docs | pending | |
 
-### Where to resume (phase 5, pull request 2)
+### Where to resume (release of phases 4 and 5, then phase 6)
 
-The RAG part of phase 5 is merged. Next is the urgency view on `feat/assistant-urgency-view` (Kafka listener, Lua script of ADR 0021, `GET /asistente/estado-urgencias`), then the release of phases 4 and 5 to `main` with their tags.
+Phases 4 and 5 are merged into `develop`. Pending, in this order:
 
-### Earlier notes (phase 4 release and the start of phase 5)
-
-Phase 4 is built on `feat/phase-4-escalation` and goes to `develop` through its pull request, then to `main` with a merge commit and the tag `phase-4-escalation`. After that, branch `feat/phase-5-assistant` from `develop`. Starting points for the assistant:
-
-- The phase is planned and its decisions are recorded in the Phase 5 section below (two pull requests: RAG first, then the urgency view). Start with `feat/assistant-rag` from `develop`.
-- The event contract is ready in `triaxis-common` (`TriageEvent`, four event types, all carrying the level). Escalation events have no `correlationId` or `traceparent` header (ASSUMPTIONS A31), so the consumer must treat them as optional.
-- The urgency view is built only from Kafka (group `assistant-urgency-view`, manual ack, Lua script in Redis); never call the triage API.
-- ADRs due in the phase: 0002 (vectors over R2DBC), 0004 (degraded mode), 0007 (anti-hallucination), 0008 (Gemini).
-- Conventions that apply: errors through the shared base handler and writer, role rules in the service's `AuthorizationRulesCustomizer`, BlockHound and ArchUnit tests, blocking SDK calls on `boundedElastic`, no real LLM in tests, no secrets in the repository.
-- Documentation sync: follow the checklist in `CLAUDE.md` and run `scripts/check-docs.sh` before each pull request.
+1. Release to `main`: a pull request from `develop` into `main` merged with a merge commit, then the tags `phase-4-escalation` and `phase-5-assistant` (the user decides when).
+2. Phase 6 (operation report, RF-05): plan it and record the approved decisions in its section before writing code; the SQL is in `ARCHITECTURE.md` section 6.7.
+3. Conventions that now apply to every service: a source package named `out` is tracked (the ignore rule only covers `/out/` and `/*/out/`); check a fresh clone compiles before a release; in the assistant, BlockHound is installed when the test JVM starts.
 
 ## Cut list and priorities
 
@@ -208,10 +201,10 @@ Pull request 1: RAG (`feat/assistant-rag`)
 - [x] With a real Gemini key (added during the phase): models checked, threshold calibrated (0.33), end-to-end check through the endpoint (A36)
 
 Pull request 2: urgency view (`feat/assistant-urgency-view`)
-- [ ] Kafka listener (group `assistant-urgency-view`, manual acknowledgment after the script), Lua script with the rules of ADR 0021
-- [ ] Rebuild from the earliest offset when `urgency:meta` is missing
-- [ ] `GET /asistente/estado-urgencias` with the five levels, the total and `actualizadoEn`
-- [ ] Readiness with Redis; consumer side of the `traceparent` header (optional `correlationId`, A31)
+- [x] Kafka listener (group `assistant-urgency-view`, manual acknowledgment after the script), Lua script with the rules of ADR 0021
+- [x] Rebuild from the earliest offset when `urgency:meta` is missing (when partitions are assigned, A38)
+- [x] `GET /asistente/estado-urgencias` with the five levels, the total and `actualizadoEn`
+- [x] Readiness with Redis; consumer side of the `traceparent` header (optional `correlationId`, A31)
 
 Modules: `triaxis-assistant-service`.
 
@@ -371,7 +364,7 @@ One entry per finished piece of work: what was done, decisions taken, how it was
 - **Found while testing:** a JUnit run once hung in a WebTestClient call that has no timeout; it did not reproduce in ten later runs. A default JUnit timeout of 120 seconds was added to the services so a hang fails with a stack trace instead of blocking.
 - **Not verified yet:** traces reaching Azure, the Prometheus scrape in a cluster, and the consumer side of the `traceparent` header (assistant, phase 5).
 
-### Phase 4: Escalation (done, in review)
+### Phase 4: Escalation (done)
 
 - **What:** the domain rules `Patient.slaExceededAt`, `escalationDueAt` and `escalate` (strict limit, only `REGISTERED` and never escalated, status and `status_changed_at` unchanged); `PatientEvent.escalated`; the port `PatientRepository.escalateOverdue(now, limit)` with one atomic `UPDATE ... RETURNING` over a CTE with `FOR UPDATE SKIP LOCKED`, ordered by `registered_at, id`, and the status and flag checked again on the locked rows; `EscalateOverduePatientsUseCase`, which writes the flag, one audit entry (`ESCALATED`, actor `system`) and one `paciente_escalado` outbox event per patient in one unit of work, then increments `triage.escalations` by level; the `EscalationScheduler` input adapter (`triage.escalation.enabled`, `interval` PT30S, `batch-size` 100; cycles never overlap, a full batch starts another one, a failed cycle is logged and retried on the next tick).
 - **Decisions:** ADR 0006; assumptions A31 (escalation events carry no request trace) and A32 (both statuses of the event and audit entry are the current one). The escalation rows are read completely before the audit and outbox statements run on the same connection. MapStruct reads `Patient.escalate(Instant)` as a fluent setter, so the entity mapper ignores it explicitly.
@@ -406,6 +399,29 @@ One entry per finished piece of work: what was done, decisions taken, how it was
     - three hard questions get the notice from the model: a drug the protocol does not name, a prompt injection asking for a dose, and the dose of a contraindicated drug;
     - latency is about 1 second per answer, after turning off thinking (the first answer took 16.5 seconds with it).
 - **Not verified yet:** the urgency view (pull request 2), and the assistant in containers (phase 8).
+
+### Phase 5, pull request 2: urgency view (done)
+
+- **What:**
+  - **Listener:** asynchronous Kafka listener `UrgencyViewListener` in its own group `assistant-urgency-view`. It returns a `Mono` and acknowledges after Redis applied the event (ADR 0001), with at most 64 records in flight.
+  - **Store:** Lua script with the rules of ADR 0021 in `RedisUrgencyViewStore` (patient hashes, counters, metadata, 30-day discharged marker).
+  - **Rebuild:** from the beginning of the topic when partitions are assigned and the store is empty.
+  - **Endpoint:** `GET /asistente/estado-urgencias` (`NURSE`, `DOCTOR`) with `porNivel`, `total` and `actualizadoEn` (A35).
+  - **Readiness and metrics:** readiness with Redis; metric `assistant.urgency.events`.
+- **Decisions:** assumption A38 (invalid records are skipped and counted; rebuild only when partitions are assigned).
+- **Found while building:**
+  - **The Lua script:** BlockHound reported that a Redis script built from a resource reads the file again on a Redis I/O thread, so the script is read once at startup.
+  - **The rebuild:** a seek to the beginning while the asynchronous listener runs did not replay the records, and in the full suite it left the partition stopped. The rebuild happens only when partitions are assigned, and the test restarts the listener container.
+- **Verified:**
+  - **Build:** `./gradlew :triaxis-assistant-service:test` passes (112 tests).
+  - **Redis store:** duplicates, a missing registration, a discharge before the registration, the discharge marker with its expiry, counts per level, the newest time and the reset.
+  - **Listener:** duplicates and discharges, a patient seen only in consultation, invalid records skipped while later ones are applied, and a lost view rebuilt after a restart.
+  - **Endpoint:** shape and roles.
+  - **Manual check with the compose infrastructure, auth, triage and the assistant:**
+    - starting with an empty Redis rebuilt the view from the topic (the patient of the phase 4 check, still in consultation, was counted);
+    - three registrations and two discharges through triage were reflected in the view within seconds;
+    - a doctor reads the view, and a call without a token gets 401.
+- **Not verified yet:** several assistant replicas sharing the consumer group, and the services in containers (phase 8).
 
 ---
 
