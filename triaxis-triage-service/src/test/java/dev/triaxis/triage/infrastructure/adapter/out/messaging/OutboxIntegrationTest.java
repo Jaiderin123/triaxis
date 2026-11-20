@@ -59,34 +59,38 @@ class OutboxIntegrationTest {
 			Map.entry("temperatura", 36.8), Map.entry("dolor", 8), Map.entry("gcs", 15),
 			Map.entry("quejaPrincipal", "Dolor toracico"));
 
-	private WebTestClient.ResponseSpec post(String correlationHeader) {
+	private static final String TRACE_ID = "4bf92f3577b34da6a3ce929d0e0e4736";
+	private static final String TRACEPARENT = "00-" + TRACE_ID + "-00f067aa0ba902b7-01";
+
+	/** Posts a patient; the optional traceparent plays the role of a caller that already has a trace. */
+	private WebTestClient.ResponseSpec post(String traceparent) {
 		WebTestClient.RequestBodySpec request = client.post().uri("/triage/pacientes")
 				.header(HttpHeaders.AUTHORIZATION, "Bearer " + token("nurse-ana", "NURSE"))
 				.contentType(MediaType.APPLICATION_JSON);
-		if (correlationHeader != null) {
-			request = request.header("X-Correlation-Id", correlationHeader);
+		if (traceparent != null) {
+			request = request.header("traceparent", traceparent);
 		}
 		return request.bodyValue(CRITICAL_PATIENT).exchange();
 	}
 
 	private List<Map<String, Object>> outboxRows(String patientId) {
 		return database.sql("""
-				SELECT event_type, message_key, correlation_id, payload::text AS payload, published_at
+				SELECT event_type, message_key, correlation_id, traceparent, payload::text AS payload, published_at
 				FROM outbox_events WHERE message_key = :key ORDER BY id
 				""").bind("key", patientId)
 				.map(row -> Map.<String, Object>of(
 						"type", row.get("event_type", String.class),
 						"key", row.get("message_key", String.class),
 						"correlation", String.valueOf(row.get("correlation_id", String.class)),
+						"traceparent", String.valueOf(row.get("traceparent", String.class)),
 						"payload", row.get("payload", String.class),
 						"published", row.get("published_at", java.time.OffsetDateTime.class) != null))
 				.all().collectList().block();
 	}
 
 	@Test
-	void registrationWritesTheEventToTheOutboxWithTheCorrelationId() throws Exception {
-		String id = post("req-1234").expectStatus().isCreated()
-				.expectHeader().valueEquals("X-Correlation-Id", "req-1234")
+	void registrationWritesTheEventToTheOutboxWithTheTraceOfTheRequest() throws Exception {
+		String id = post(TRACEPARENT).expectStatus().isCreated()
 				.expectBody(Map.class).returnResult().getResponseBody().get("id").toString();
 
 		List<Map<String, Object>> rows = outboxRows(id);
@@ -94,7 +98,8 @@ class OutboxIntegrationTest {
 		assertThat(rows).hasSize(1);
 		Map<String, Object> row = rows.get(0);
 		assertThat(row).containsEntry("type", "paciente_registrado").containsEntry("key", id)
-				.containsEntry("correlation", "req-1234").containsEntry("published", false);
+				.containsEntry("correlation", TRACE_ID).containsEntry("published", false);
+		assertThat((String) row.get("traceparent")).startsWith("00-" + TRACE_ID + "-");
 		TriageEvent event = json.readValue((String) row.get("payload"), TriageEvent.class);
 		assertThat(event.tipo()).isEqualTo(EventType.PACIENTE_REGISTRADO);
 		assertThat(event.version()).isEqualTo(1);
@@ -139,21 +144,23 @@ class OutboxIntegrationTest {
 	}
 
 	@Test
-	void aGeneratedCorrelationIdIsReturnedAndStored() {
-		String generated = post(null).expectStatus().isCreated().returnResult(Map.class)
-				.getResponseHeaders().getFirst("X-Correlation-Id");
+	void aRequestWithoutTraceGetsANewTraceThatIsStoredWithTheEvent() {
+		String id = post(null).expectStatus().isCreated()
+				.expectBody(Map.class).returnResult().getResponseBody().get("id").toString();
 
-		assertThat(generated).isNotBlank().hasSizeLessThanOrEqualTo(64);
-		assertThat(database.sql("SELECT count(*) AS total FROM outbox_events WHERE correlation_id = :id")
-				.bind("id", generated).map(row -> row.get("total", Long.class)).one().block()).isEqualTo(1L);
+		Map<String, Object> row = outboxRows(id).get(0);
+
+		assertThat((String) row.get("correlation")).matches("[0-9a-f]{32}");
+		assertThat((String) row.get("traceparent")).startsWith("00-" + row.get("correlation") + "-");
 	}
 
 	@Test
-	void anUnsafeCorrelationIdIsReplaced() {
-		String returned = post("bad value with spaces!").expectStatus().isCreated().returnResult(Map.class)
-				.getResponseHeaders().getFirst("X-Correlation-Id");
+	void anInvalidTraceparentIsIgnoredAndANewTraceIsStarted() {
+		String id = post("not-a-traceparent").expectStatus().isCreated()
+				.expectBody(Map.class).returnResult().getResponseBody().get("id").toString();
 
-		assertThat(returned).isNotEqualTo("bad value with spaces!").matches("^[A-Za-z0-9._-]{1,64}$");
+		assertThat((String) outboxRows(id).get(0).get("correlation")).matches("[0-9a-f]{32}")
+				.isNotEqualTo(TRACE_ID);
 	}
 
 	@Test

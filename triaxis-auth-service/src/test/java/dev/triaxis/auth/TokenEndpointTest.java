@@ -42,13 +42,19 @@ class TokenEndpointTest {
 
 	@Test
 	void rejectsWrongPasswordAndUnknownUserWithTheSameAnswer() {
-		String wrongPassword = login("nurse", "wrong").expectStatus().isUnauthorized()
-				.expectBody(String.class).returnResult().getResponseBody();
-		String unknownUser = login("ghost", "wrong").expectStatus().isUnauthorized()
-				.expectBody(String.class).returnResult().getResponseBody();
+		Map<String, Object> wrongPassword = problem(login("nurse", "wrong"));
+		Map<String, Object> unknownUser = problem(login("ghost", "wrong"));
 
-		assertThat(wrongPassword).isEqualTo(unknownUser);
-		assertThat(wrongPassword).contains("Invalid credentials");
+		// Only the trace, the timestamp and the instance can differ; nothing reveals whether the user exists.
+		assertThat(wrongPassword.get("status")).isEqualTo(401);
+		assertThat(wrongPassword.get("title")).isEqualTo(unknownUser.get("title"));
+		assertThat(wrongPassword.get("detail")).isEqualTo(unknownUser.get("detail")).isEqualTo("Invalid credentials");
+	}
+
+	private static Map<String, Object> problem(WebTestClient.ResponseSpec response) {
+		return response.expectStatus().isUnauthorized()
+				.expectBody(new org.springframework.core.ParameterizedTypeReference<Map<String, Object>>() {
+				}).returnResult().getResponseBody();
 	}
 
 	@Test
@@ -85,13 +91,14 @@ class TokenEndpointTest {
 				.expectBody(Map.class).returnResult().getResponseBody().get("access_token");
 
 		ReactiveJwtDecoder decoder = TriaxisJwtDecoders
-				.fromJwkSetUri("http://localhost:" + port + "/.well-known/jwks.json", "triaxis-auth");
+				.fromJwkSetUri("http://localhost:" + port + "/.well-known/jwks.json", "triaxis-auth", "triaxis");
 		Jwt jwt = decoder.decode(token).block();
 
 		assertThat(jwt).isNotNull();
 		assertThat(jwt.getSubject()).isEqualTo("doctor");
 		assertThat(jwt.<List<String>>getClaim("roles")).containsExactly("DOCTOR");
 		assertThat(jwt.getId()).isNotBlank();
+		assertThat(jwt.getAudience()).containsExactly("triaxis");
 		assertThat(jwt.getHeaders()).containsKey("kid");
 		assertThat(jwt.getExpiresAt()).isAfter(jwt.getIssuedAt());
 	}

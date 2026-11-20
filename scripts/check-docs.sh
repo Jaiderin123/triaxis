@@ -58,7 +58,14 @@ for adr in $(grep -o 'ADR[s]\? [0-9]\{4\}' CLAUDE.md | grep -o '[0-9]\{4\}' | so
 done
 ok "ADR references in CLAUDE.md"
 
-# 6. Files that must not be committed.
+# 6. Every Gradle module is described in CLAUDE.md and TECH_STACK.md.
+for module in $(grep -o "'triaxis-[a-z-]*'" settings.gradle | tr -d "'"); do
+  grep -q "$module" CLAUDE.md || fail "$module (settings.gradle) is not described in CLAUDE.md"
+  grep -q "$module" docs/TECH_STACK.md || fail "$module (settings.gradle) is not described in docs/TECH_STACK.md"
+done
+ok "modules documented"
+
+# 7. Files that must not be committed.
 if git rev-parse --git-dir >/dev/null 2>&1; then
   tracked=$(git ls-files docs/private .env 2>/dev/null)
   [ -z "$tracked" ] || fail "private files are tracked: $tracked"

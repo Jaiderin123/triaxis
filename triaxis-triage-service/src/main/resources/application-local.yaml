@@ -4,3 +4,14 @@ spring:
     url: r2dbc:postgresql://localhost:5432/triage
     username: triaxis
     password: triaxis
+
+# Readable logs while developing (the default is JSON), and a development password for the metrics endpoint.
+logging:
+  structured:
+    format:
+      console: ""
+
+triaxis:
+  web:
+    metrics:
+      password: metrics-local

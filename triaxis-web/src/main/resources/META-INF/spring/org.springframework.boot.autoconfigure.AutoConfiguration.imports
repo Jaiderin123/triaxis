@@ -1,0 +1,2 @@
+dev.triaxis.web.TriaxisWebAutoConfiguration
+dev.triaxis.web.TriaxisWebSecurityAutoConfiguration

@@ -1,0 +1,25 @@
+plugins {
+	id 'java-library'
+}
+
+dependencies {
+	// Distributed tracing (OpenTelemetry through Micrometer Tracing); versions come from the Spring Boot BOM.
+	api 'io.micrometer:micrometer-tracing'
+	api 'io.micrometer:micrometer-tracing-bridge-otel'
+	api 'io.opentelemetry:opentelemetry-exporter-otlp'
+	api 'io.micrometer:context-propagation'
+
+	// The services bring WebFlux, Jackson and Spring Security; this library only compiles against them.
+	compileOnly 'org.springframework.boot:spring-boot-starter-webflux'
+	compileOnly 'org.springframework.boot:spring-boot-starter-security'
+	compileOnly 'org.springframework.boot:spring-boot-starter-actuator'
+
+	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+	testImplementation 'org.springframework.boot:spring-boot-starter-webflux'
+	testImplementation 'org.springframework.boot:spring-boot-starter-security'
+	testImplementation 'org.springframework.boot:spring-boot-starter-actuator'
+	testImplementation 'io.micrometer:micrometer-registry-prometheus'
+	testImplementation 'io.projectreactor:reactor-test'
+	testImplementation 'org.springframework.security:spring-security-test'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}

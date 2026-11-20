@@ -19,6 +19,8 @@ import org.springframework.security.oauth2.server.resource.authentication.Reacti
 import org.springframework.security.oauth2.server.resource.authentication.ReactiveJwtGrantedAuthoritiesConverterAdapter;
 import org.springframework.security.web.server.SecurityWebFilterChain;
 import org.springframework.security.web.server.context.NoOpServerSecurityContextRepository;
+import dev.triaxis.web.security.ProblemAccessDeniedHandler;
+import dev.triaxis.web.security.ProblemAuthenticationEntryPoint;
 import org.springframework.util.Assert;
 import reactor.core.publisher.Mono;
 
@@ -26,7 +28,8 @@ import reactor.core.publisher.Mono;
  * Shared resource-server configuration: validates RS256 tokens issued by the auth service,
  * maps the {@code roles} claim to {@code ROLE_*} authorities and keeps the health probes public.
  */
-@AutoConfiguration(before = {ReactiveSecurityAutoConfiguration.class, ReactiveOAuth2ResourceServerAutoConfiguration.class})
+@AutoConfiguration(after = dev.triaxis.web.TriaxisWebSecurityAutoConfiguration.class,
+		before = {ReactiveSecurityAutoConfiguration.class, ReactiveOAuth2ResourceServerAutoConfiguration.class})
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.REACTIVE)
 @ConditionalOnProperty(prefix = "triaxis.security", name = "enabled", matchIfMissing = true)
 @EnableConfigurationProperties(TriaxisSecurityProperties.class)
@@ -36,7 +39,7 @@ public class TriaxisSecurityAutoConfiguration {
 	@ConditionalOnMissingBean(ReactiveJwtDecoder.class)
 	ReactiveJwtDecoder triaxisJwtDecoder(TriaxisSecurityProperties properties) {
 		Assert.hasText(properties.jwksUri(), "triaxis.security.jwks-uri must be set");
-		return TriaxisJwtDecoders.fromJwkSetUri(properties.jwksUri(), properties.issuer());
+		return TriaxisJwtDecoders.fromJwkSetUri(properties.jwksUri(), properties.issuer(), properties.audience());
 	}
 
 	@Bean
@@ -51,10 +54,10 @@ public class TriaxisSecurityAutoConfiguration {
 	}
 
 	@Bean
-	@ConditionalOnMissingBean(SecurityWebFilterChain.class)
 	SecurityWebFilterChain triaxisSecurityWebFilterChain(ServerHttpSecurity http, ReactiveJwtDecoder decoder,
 			Converter<Jwt, Mono<AbstractAuthenticationToken>> triaxisJwtAuthenticationConverter,
-			ObjectProvider<AuthorizationRulesCustomizer> customizers) {
+			ObjectProvider<AuthorizationRulesCustomizer> customizers, ProblemAuthenticationEntryPoint entryPoint,
+			ProblemAccessDeniedHandler denied) {
 		return http
 				.csrf(ServerHttpSecurity.CsrfSpec::disable)
 				.httpBasic(ServerHttpSecurity.HttpBasicSpec::disable)
@@ -65,7 +68,10 @@ public class TriaxisSecurityAutoConfiguration {
 					customizers.orderedStream().forEach(customizer -> customizer.customize(exchanges));
 					exchanges.anyExchange().authenticated();
 				})
+				.exceptionHandling(handling -> handling.authenticationEntryPoint(entryPoint).accessDeniedHandler(denied))
 				.oauth2ResourceServer(oauth2 -> oauth2
+						.authenticationEntryPoint(entryPoint)
+						.accessDeniedHandler(denied)
 						.jwt(jwt -> jwt.jwtDecoder(decoder).jwtAuthenticationConverter(triaxisJwtAuthenticationConverter)))
 				.build();
 	}

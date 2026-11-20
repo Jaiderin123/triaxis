@@ -27,12 +27,13 @@ import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
 public class TestSecurityConfiguration {
 
 	public static final String ISSUER = "triaxis-auth";
+	public static final String AUDIENCE = "triaxis";
 
 	private static final KeyPair KEYS = generate();
 
 	@Bean
 	ReactiveJwtDecoder testJwtDecoder() {
-		return TriaxisJwtDecoders.fromPublicKey((RSAPublicKey) KEYS.getPublic(), ISSUER);
+		return TriaxisJwtDecoders.fromPublicKey((RSAPublicKey) KEYS.getPublic(), ISSUER, AUDIENCE);
 	}
 
 	public static String token(String subject, String... roles) {
@@ -43,15 +44,25 @@ public class TestSecurityConfiguration {
 		return sign(KEYS, subject, ISSUER, Instant.now().minusSeconds(3600), roles);
 	}
 
+	public static String tokenForAudience(String audience, String subject, String... roles) {
+		return sign(KEYS, subject, ISSUER, audience, Instant.now().plusSeconds(600), roles);
+	}
+
 	public static String tokenSignedByAnotherKey(String subject, String... roles) {
 		return sign(generate(), subject, ISSUER, Instant.now().plusSeconds(600), roles);
 	}
 
 	private static String sign(KeyPair pair, String subject, String issuer, Instant expiresAt, String... roles) {
+		return sign(pair, subject, issuer, AUDIENCE, expiresAt, roles);
+	}
+
+	private static String sign(KeyPair pair, String subject, String issuer, String audience, Instant expiresAt,
+			String... roles) {
 		try {
 			JWTClaimsSet claims = new JWTClaimsSet.Builder()
 					.subject(subject)
 					.issuer(issuer)
+					.audience(audience)
 					.issueTime(new Date())
 					.expirationTime(Date.from(expiresAt))
 					.jwtID(UUID.randomUUID().toString())

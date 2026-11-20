@@ -21,6 +21,7 @@ import reactor.test.StepVerifier;
 class TriaxisJwtDecodersTest {
 
 	private static final String ISSUER = "triaxis-auth";
+	private static final String AUDIENCE = "triaxis";
 
 	private static KeyPair keyPair;
 	private static ReactiveJwtDecoder decoder;
@@ -30,7 +31,7 @@ class TriaxisJwtDecodersTest {
 		KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
 		generator.initialize(2048);
 		keyPair = generator.generateKeyPair();
-		decoder = TriaxisJwtDecoders.fromPublicKey((RSAPublicKey) keyPair.getPublic(), ISSUER);
+		decoder = TriaxisJwtDecoders.fromPublicKey((RSAPublicKey) keyPair.getPublic(), ISSUER, AUDIENCE);
 	}
 
 	@Test
@@ -48,6 +49,20 @@ class TriaxisJwtDecodersTest {
 	@Test
 	void rejectsExpiredToken() throws Exception {
 		String token = sign(keyPair, ISSUER, Instant.now().minusSeconds(3600));
+
+		StepVerifier.create(decoder.decode(token)).expectError().verify();
+	}
+
+	@Test
+	void rejectsATokenMeantForAnotherSystem() throws Exception {
+		String token = sign(keyPair, ISSUER, Instant.now().plusSeconds(600), "another-system");
+
+		StepVerifier.create(decoder.decode(token)).expectError().verify();
+	}
+
+	@Test
+	void rejectsATokenWithoutAudience() throws Exception {
+		String token = sign(keyPair, ISSUER, Instant.now().plusSeconds(600), null);
 
 		StepVerifier.create(decoder.decode(token)).expectError().verify();
 	}
@@ -80,13 +95,20 @@ class TriaxisJwtDecodersTest {
 	}
 
 	private static String sign(KeyPair pair, String issuer, Instant expiresAt) throws Exception {
-		JWTClaimsSet claims = new JWTClaimsSet.Builder()
+		return sign(pair, issuer, expiresAt, AUDIENCE);
+	}
+
+	private static String sign(KeyPair pair, String issuer, Instant expiresAt, String audience) throws Exception {
+		JWTClaimsSet.Builder builder = new JWTClaimsSet.Builder()
 				.subject("nurse")
 				.issuer(issuer)
 				.issueTime(new Date())
 				.expirationTime(Date.from(expiresAt))
-				.claim("roles", List.of("NURSE"))
-				.build();
+				.claim("roles", List.of("NURSE"));
+		if (audience != null) {
+			builder.audience(audience);
+		}
+		JWTClaimsSet claims = builder.build();
 		SignedJWT jwt = new SignedJWT(new JWSHeader(JWSAlgorithm.RS256), claims);
 		jwt.sign(new RSASSASigner((RSAPrivateKey) pair.getPrivate()));
 		return jwt.serialize();

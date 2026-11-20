@@ -10,3 +10,14 @@ auth:
     - username: doctor
       password-hash: "$2a$10$GnQPXp5gAWXuTJVovHGY5u.yfjJBmSPtZ/pByA9ewIyLx9AONMJaa"
       roles: [DOCTOR]
+
+# Readable logs while developing (the default is JSON), and a development password for the metrics endpoint.
+logging:
+  structured:
+    format:
+      console: ""
+
+triaxis:
+  web:
+    metrics:
+      password: metrics-local

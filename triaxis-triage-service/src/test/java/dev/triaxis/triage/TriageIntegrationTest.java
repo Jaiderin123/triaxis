@@ -6,6 +6,7 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
+import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
 import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
@@ -17,8 +18,10 @@ import org.springframework.context.annotation.Import;
 @Documented
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.TYPE)
-@SpringBootTest(properties = {"spring.test.webtestclient.timeout=30s", "triage.outbox.relay.enabled=false"})
+@SpringBootTest(properties = {"spring.test.webtestclient.timeout=30s", "triage.outbox.relay.enabled=false",
+		"triaxis.web.metrics.username=scraper", "triaxis.web.metrics.password=test-metrics-secret"})
 @AutoConfigureWebTestClient
+@AutoConfigureObservability
 @Import({TestcontainersConfiguration.class, TestSecurityConfiguration.class})
 public @interface TriageIntegrationTest {
 }

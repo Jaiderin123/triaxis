@@ -11,7 +11,7 @@ Triaxis is a reactive digital triage system with a clinical assistant. Nurses re
 | Phased checklist (what to do next) | `docs/PLAN.md` |
 | Assumptions and ambiguities | `docs/ASSUMPTIONS.md` |
 | Git and commit conventions | `docs/GIT_WORKFLOW.md` |
-| Decision records | `docs/adr/` (README, template and ADRs 0001, 0003, 0005, 0009, 0012, 0013, 0014, 0015, 0016 and 0017 exist; the status of the rest is in `ARCHITECTURE.md` section 14) |
+| Decision records | `docs/adr/` (README, template and ADRs 0001, 0003, 0005, 0009, 0012, 0013, 0014, 0015, 0016, 0017, 0018, 0019 and 0020 exist; the status of the rest is in `ARCHITECTURE.md` section 14) |
 | Original requirements (RF-xx, RN-xx), Spanish | `docs/private/ASSIGNMENT.md` (local only, git-ignored) |
 
 ## Modules
@@ -23,8 +23,9 @@ Triaxis is a reactive digital triage system with a clinical assistant. Nurses re
 | `triaxis-auth-service` | 8083 | Issues RS256 JWTs, exposes JWKS (`/auth/**`, `/.well-known/jwks.json`) |
 | `triaxis-common` | n/a | Library: event contract records (`triaje.eventos`) |
 | `triaxis-security` | n/a | Library: shared resource-server (JWT) configuration |
+| `triaxis-web` | n/a | Library: standard error responses, access log, protected metrics, tracing (no business logic) |
 
-All five modules exist on Spring Boot 3.5.16 and `./gradlew build` passes. Done: auth service and shared security (phase 1), the triage core with the audit (phase 2) and the events through a transactional outbox with an ordered relay to Kafka (phase 3). Next: escalation (phase 4). The assistant (RAG and the urgency view) is not started. The status table and the resume notes are in `docs/PLAN.md`.
+All five modules exist on Spring Boot 3.5.16 and `./gradlew build` passes. Done: auth service and shared security (phase 1), the triage core with the audit (phase 2), the events through a transactional outbox with an ordered relay to Kafka (phase 3) and the platform foundation (standard errors, OpenTelemetry, JSON logs, protected metrics, hardening). Next: escalation (phase 4). The assistant (RAG and the urgency view) is not started. The status table and the resume notes are in `docs/PLAN.md`.
 
 ## Package layout (hexagonal, per service)
 
@@ -39,7 +40,9 @@ infrastructure  adapter.in (web, scheduler, messaging), adapter.out (persistence
 - `infrastructure` may depend on both; nothing depends on `infrastructure`. ArchUnit tests enforce this.
 - The Spanish external contract is mapped in DTOs and mappers at the boundary. The domain uses English names.
 - Time comes from a `Clock` port (UTC). Never call `Instant.now()` in domain or application code.
-- Web adapters use functional endpoints (`RouterFunction` + handler), not `@RestController`. Errors go through a `WebExceptionHandler` that returns `ProblemDetail`.
+- Web adapters use functional endpoints (`RouterFunction` + handler), not `@RestController`.
+- Errors: every service has one global handler that extends `AbstractProblemExceptionHandler` (from `triaxis-web`) and only maps its own exceptions; responses are written by `ProblemWriter` only (RFC 7807 with `instance`, `traceId`, `timestamp`; 401, 403, 413, 415, 429 and 500 included). Never write an error response by hand.
+- Logs go to standard output as ECS JSON (plain text in the `local` profile). The trace id is the correlation id; do not add a custom correlation mechanism. Never log bodies, tokens or passwords.
 
 ## Non-negotiable rules
 
@@ -69,6 +72,7 @@ Isolation
 - Triage never depends on the assistant. The urgency view is built only from Kafka events, never by calling the triage API.
 
 Security and hygiene
+- Every new endpoint gets its role rule in the service's `AuthorizationRulesCustomizer`; tokens must carry the audience; only health, info and the protected Prometheus endpoint are exposed by actuator.
 - No secrets in code or git history. Configuration through environment variables (`GEMINI_API_KEY`, `JWT_PRIVATE_KEY`, and so on). Tests never call a real LLM.
 - External contract in Spanish exactly as specified (paths, JSON fields, event names, state and level values). Code, comments, commits and docs in English. No `@author` tags.
 - Specification ambiguities that change behavior get an ADR (for example ADR 0013).
@@ -77,7 +81,7 @@ Security and hygiene
 
 1. Read `docs/PLAN.md` and take the next unchecked task.
 2. Write tests first for domain logic (classifier E1 to E6, transitions, SLA, complaint matching).
-3. Keep commits small, with Conventional Commits (`feat:`, `fix:`, `test:`, `docs:`, `chore:`). Commit only when the user asks. Follow `docs/GIT_WORKFLOW.md`: work branches from `develop`, changes reach `develop` and `main` only through pull requests, never run a local `git merge` into them.
+3. Work by phase or feature: one branch and one pull request per phase, with a few meaningful commits (Conventional Commits). Commit only when the user asks. Follow `docs/GIT_WORKFLOW.md`: branches from `develop`, changes reach `develop` (rebase and merge) and `main` (merge commit) only through pull requests, never run a local `git merge` into them.
 4. Run `./gradlew build` before declaring a task done. Tick the box in `PLAN.md`.
 5. When a task or phase finishes, add an entry to the progress log at the end of `docs/PLAN.md` (what, decisions, verification, PRs). Treat it as the living specification.
 6. Record any new ambiguity or decision in `docs/ASSUMPTIONS.md`; write an ADR for architecture-level decisions.
@@ -110,7 +114,8 @@ export JAVA_HOME=$HOME/.jdks/temurin-21.0.10
 ./gradlew :triaxis-assistant-service:bootRun      # assistant on 8082 (skeleton only, unverified)
 ./gradlew :triaxis-auth-service:bootRun --args='--spring.profiles.active=local'   # auth on 8083, demo users nurse/doctor (verified)
 docker compose up -d                              # PostgreSQL (pgvector), Kafka (topic triaje.eventos), Redis (verified); services are added in phase 8
-docker compose up -d postgres kafka kafka-init    # what the triage service needs to run with the relay (verified)
+docker compose up -d postgres kafka kafka-init jaeger   # triage with the relay and traces; Jaeger UI on http://localhost:16686 (verified)
+curl -u metrics:metrics-local localhost:8081/actuator/prometheus   # metrics with the local profile password (verified)
 kubectl apply -f deploy/k8s/                      # manifests (not created yet; kubectl 1.34.13 and kind 0.33.0 are in ~/.local/bin; az is not installed)
 ```
 
