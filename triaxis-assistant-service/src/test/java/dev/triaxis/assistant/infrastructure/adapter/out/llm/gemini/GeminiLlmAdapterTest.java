@@ -4,10 +4,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.triaxis.assistant.domain.model.ModelAnswer;
 import dev.triaxis.assistant.domain.model.NumberedExcerpt;
 import dev.triaxis.assistant.domain.model.ProtocolChunk;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
@@ -73,7 +77,7 @@ class GeminiLlmAdapterTest {
 	}
 
 	private static GeminiLlmAdapter adapter(ChatModel chat) {
-		return new GeminiLlmAdapter(chat, new FakeEmbeddings(), "gemini-embedding-test");
+		return new GeminiLlmAdapter(chat, new FakeEmbeddings(), "gemini-embedding-test", new ObjectMapper());
 	}
 
 	private static List<NumberedExcerpt> excerpts() {
@@ -109,6 +113,27 @@ class GeminiLlmAdapterTest {
 
 		StepVerifier.create(adapter(chat).answer("¿Diabetes?", excerpts()))
 				.expectNext(ModelAnswer.noProtocolFound())
+				.verifyComplete();
+	}
+
+	@Test
+	@ExtendWith(OutputCaptureExtension.class)
+	void anUnreadableAnswerIsNeverWrittenToTheLog(CapturedOutput output) {
+		String clinicalText = "Administrar 40 mg de furosemida intravenosa de inmediato.";
+
+		StepVerifier.create(adapter(new FakeChat(clinicalText)).answer("¿?", excerpts()))
+				.expectNext(ModelAnswer.unusable())
+				.verifyComplete();
+
+		assertThat(output.getAll()).doesNotContain(clinicalText).doesNotContain("furosemida");
+	}
+
+	@Test
+	void anAnswerInsideACodeFenceIsRead() {
+		FakeChat chat = new FakeChat("```json\n{\"answer\": \"Reconfirmar.\", \"excerpts\": [1], \"noProtocol\": false}\n```");
+
+		StepVerifier.create(adapter(chat).answer("¿?", excerpts()))
+				.expectNext(new ModelAnswer("Reconfirmar.", List.of(1), false))
 				.verifyComplete();
 	}
 
