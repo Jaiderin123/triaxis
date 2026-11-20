@@ -22,6 +22,15 @@ public record AuthProperties(Jwt jwt, @DefaultValue List<UserEntry> users, @Defa
 			/** PKCS#8 PEM private key; empty when it must be generated (local profile only). */
 			@DefaultValue("") String privateKey,
 			@DefaultValue("false") boolean generateKeyIfMissing) {
+
+		/** Never prints the private key; only whether one is configured. */
+		@Override
+		public String toString() {
+			return "Jwt[issuer=" + issuer + ", audience=" + audience + ", ttl=" + ttl + ", privateKey="
+					+ (privateKey == null || privateKey.isBlank() ? "<none>" : "***") + ", generateKeyIfMissing="
+					+ generateKeyIfMissing + "]";
+		}
+
 	}
 
 	/** Attempts allowed on the token endpoint per username and per address in each window. */
@@ -29,6 +38,13 @@ public record AuthProperties(Jwt jwt, @DefaultValue List<UserEntry> users, @Defa
 	}
 
 	public record UserEntry(String username, String passwordHash, Set<Role> roles) {
+
+		/** Never prints the password hash. */
+		@Override
+		public String toString() {
+			return "UserEntry[username=" + username + ", passwordHash=***, roles=" + roles + "]";
+		}
+
 	}
 
 }
