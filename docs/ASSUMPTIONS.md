@@ -305,7 +305,15 @@ A1 to A4 come from `ARCHITECTURE.md` section 6.2. A5 onward were added while pre
 ## A45. Delivery of the escalation alert
 
 - **Ambiguity:** Kafka delivers at least once, and a channel can be down; RF-06 says nothing about duplicates or failures.
-- **Decision:** every handled event is recorded in `alert_deliveries` (event id as the key) after it was sent or given up, and an event already recorded is not sent again (counted as `duplicate`). A failed send is retried up to 3 times with growing waits (1 s, 2 s, 4 s); then the alert is counted as `failed`, logged without patient data, and the next event goes on. The escalation itself is never affected.
+- **Decision:** every handled event is recorded in `alert_deliveries` (event id as the key) after it was sent or given up, and an event already recorded is not sent again (counted as `duplicate`). A send is tried up to 3 times in total, waiting 1 s and then 2 s between the attempts; then the alert is counted as `failed`, logged without patient data, and the next event goes on. The escalation itself is never affected.
 - **Why:** repeated alerts erode trust in the channel; one channel outage must not hold every later alert.
 - **Impact if wrong:** an alert that failed three times is not sent again (it stays in the logs, the metric and the table); a crash after the send and before the record can still repeat one alert.
+- **Later:** a patient that no longer waits when the event is handled is recorded as `SKIPPED` and not alerted (A46, ADR 0023).
 
+
+## A46. Old and late escalation events
+
+- **Ambiguity:** the alert listener reads `triaje.eventos` in its own consumer group. When the group starts for the first time (a first deployment, or offsets lost or expired) it must choose where to start, and an event can also be handled long after it happened (the listener was down). RF-06 says nothing about old events.
+- **Decision:** the group starts from the oldest retained event (`auto.offset.reset=earliest`), so no escalation is lost. Before sending, the patient is read: a patient that no longer waits (in consultation or discharged) is not alerted and the event is recorded as `SKIPPED`; a patient that still waits is alerted however old the event is (ADR 0023).
+- **Why:** the manual check of phase 7 showed that a new group replays the retained escalations, including patients already attended; an alert must reach the team only while it can still help.
+- **Impact if wrong:** a patient attended while the listener was down gets no alert at all (intended), and the status is read at handling time, so a patient that enters consultation a moment later is still alerted.

@@ -1,6 +1,6 @@
 # 0011. Alerts to the medical team: a Kafka listener with a log or webhook notifier
 
-- **Status:** Accepted
+- **Status:** Accepted; the delivery rules are partly superseded by [0023](0023-alerts-only-for-waiting-patients.md) (patients that no longer wait are skipped)
 - **Date:** 2026-11-20
 - **Author:** Jaider Betancur Torres
 
@@ -20,7 +20,7 @@ RF-06 asks the system to alert the medical team when a patient is escalated. It 
   
   It carries no name, vital signs or complaint (ASSUMPTIONS A44).
 - **Delivery.**
-  - Up to 3 attempts with growing waits (1 s, 2 s, 4 s). After that the alert is counted as failed, logged without patient data, and the listener goes on with the next event, so a webhook that is down never stops the queue.
+  - Up to 3 attempts in total, with growing waits between them (1 s, then 2 s). After that the alert is counted as failed, logged without patient data, and the listener goes on with the next event, so a webhook that is down never stops the queue.
   - Every handled event is recorded in a table `alert_deliveries` (event id as the key, outcome, time), and an event already recorded is not sent again. Redeliveries of Kafka, restarts and rebalances therefore do not repeat alerts (ASSUMPTIONS A45).
   - The record is acknowledged after it was handled.
 - **Observability.** The metric `triage.alerts` is tagged with the outcome: `sent`, `failed` or `duplicate`. Invalid records are skipped and counted.

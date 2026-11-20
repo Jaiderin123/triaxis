@@ -78,7 +78,7 @@ The name must be checked on GitHub and Google before publishing, to avoid clashi
 | Coverage | JaCoCo |
 | Mapping | MapStruct **1.6.3** (latest stable; 1.7 is still beta) | Generated mappers at the boundaries: DTO to command, entity to domain, domain to response |
 | Architecture rules | ArchUnit **1.5.1**: enforces the hexagonal dependency rules (domain, application, infrastructure) |
-| Non-blocking proof | BlockHound **1.0.18.RELEASE**: fails a test if a blocking call runs on an event-loop thread (in the assistant it is installed when the test JVM starts) |
+| Non-blocking proof | BlockHound **1.0.18.RELEASE**: fails a test if a blocking call runs on an event-loop thread (in the assistant and in triage it is installed when the test JVM starts) |
 | Test fixtures | The core Gradle plugin `java-test-fixtures` in `triaxis-security` shares `RouteInventory` with the services (no new library) |
 | Time zone of the tests | Every test JVM runs in `America/Bogota` (`user.timezone`), so code that depends on the JVM zone fails |
 | Redis in tests | Testcontainers generic Redis container (`redis` image, pinned tag); no extra library |

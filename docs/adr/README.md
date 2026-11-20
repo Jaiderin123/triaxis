@@ -24,7 +24,7 @@ Ambiguities in the requirements specification that change behavior are recorded 
 | 0007 | [Anti-hallucination strategy: retrieval gate, constrained prompt and validated citations](0007-anti-hallucination.md) | Accepted |
 | 0008 | [Gemini for answers and embeddings, with a deterministic `mock` provider by default](0008-gemini-and-mock-provider.md) | Accepted |
 | 0009 | [Spring Boot 3.5 and Spring AI 1.1, chosen on purpose](0009-spring-boot-3-5-and-spring-ai-1-1.md) | Accepted |
-| 0011 | [Alerts to the medical team: a Kafka listener with a log or webhook notifier](0011-alert-channel.md) | Accepted |
+| 0011 | [Alerts to the medical team: a Kafka listener with a log or webhook notifier](0011-alert-channel.md) | Accepted (delivery partly superseded by 0023) |
 | 0012 | [Functional endpoints instead of annotated controllers](0012-functional-endpoints.md) | Accepted |
 | 0013 | [Who may change a patient's state](0013-state-change-roles.md) | Accepted |
 | 0014 | [Clinical audit trail](0014-clinical-audit-trail.md) | Accepted |
@@ -36,3 +36,4 @@ Ambiguities in the requirements specification that change behavior are recorded 
 | 0020 | [API hardening: audience, body limit, rate limit and protected metrics](0020-api-hardening.md) | Accepted |
 | 0021 | [Idempotent urgency view that tolerates missing, repeated and late events](0021-idempotent-urgency-view.md) | Accepted |
 | 0022 | [Deny by default, bounded waits and UTC sessions](0022-deny-by-default-and-bounded-waits.md) | Accepted |
+| 0023 | [Alerts only for patients that still wait](0023-alerts-only-for-waiting-patients.md) | Accepted |
