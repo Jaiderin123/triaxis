@@ -4,6 +4,10 @@ spring:
     url: r2dbc:postgresql://localhost:5432/assistant
     username: triaxis
     password: triaxis
+  data:
+    redis:
+      # The compose Redis requires a password (REDIS_PASSWORD, default triaxis-local).
+      password: triaxis-local
 
 # Readable logs while developing (the default is JSON), and a development password for the metrics endpoint.
 logging:

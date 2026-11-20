@@ -1,0 +1,14 @@
+# Only the sources and the build scripts go into the build context. Never exclude "out" directories:
+# application.port.out is a source package.
+**/build/
+**/.gradle/
+.git/
+.idea/
+docs/
+deploy/
+scripts/
+*.md
+.env
+.env.*
+**/*.pem
+**/*.key
