@@ -20,7 +20,7 @@ Working checklist. Follow the phases in order; tick boxes as work lands. Source 
 
 ### Where to resume (phase 4)
 
-Branch from `develop` and open pull requests as in `GIT_WORKFLOW.md`. Starting points for escalation:
+Branch `feat/phase-4-escalation` from `develop` and follow `GIT_WORKFLOW.md` (one pull request per phase, rebase and merge; the release pull request to `main` is merged with a merge commit and tagged). The approved decisions and the task list are in the Phase 4 section below. Starting points for escalation:
 
 - The atomic statement is in `ARCHITECTURE.md` section 6.6: one `UPDATE ... RETURNING` with `FOR UPDATE SKIP LOCKED` over `REGISTERED` patients whose SLA expired and that are not escalated.
 - The audit entry (event type `ESCALATED`, same status before and after, actor `system`) and the outbox event `paciente_escalado` are written in the same transaction. `PatientEventType.ESCALATED`, `EventType.PACIENTE_ESCALADO` and the mapper entries already exist.
@@ -156,18 +156,23 @@ First commit: `feat(triage): publish patient events through a transactional outb
 
 **Goal:** RF-03 and RN-03.
 
+Decisions (approved, not started yet): one branch `feat/phase-4-escalation` and one pull request for the whole phase, with a few logical commits; scheduler interval of 30 seconds by default (`triage.escalation.interval`, 1 second in tests), batch size 100, loop repeated at once when a batch is full; the actor of the audit entries is `system`; the `GET` of a patient does not get a new field (the `escalado` flag already exists); an escalated patient stays `REGISTRADO` and `status_changed_at` does not change; SLA expiry is strictly greater (A6); counter `triage.escalations` tagged by level; tag `phase-4-escalation`.
+
 Tasks
-- [ ] `EscalationScheduler` with `triage.escalation.interval`, `batch-size` and SLA per level as properties
-- [ ] Atomic `UPDATE ... RETURNING` with `SKIP LOCKED`; audit and outbox rows in the same transaction
-- [ ] Metric `triage.escalations`
+- [ ] Domain event `PatientEvent.escalated`, audit entry of type `ESCALATED` (same status before and after, `escalated = true`), mapper entry (the enum values already exist)
+- [ ] `PatientRepository.escalateOverdue(now, batch)`: one atomic `UPDATE ... RETURNING` with `FOR UPDATE SKIP LOCKED` (`ARCHITECTURE.md` 6.6)
+- [ ] `EscalateOverduePatientsUseCase`: runs the update and, for every escalated patient, writes the audit entry and the outbox event in the same unit of work
+- [ ] `EscalationScheduler` (`infrastructure.adapter.in.scheduler`) with `triage.escalation.enabled`, `interval` and `batch-size` as properties; switched off in tests, which call the use case
+- [ ] Metric `triage.escalations` by level
+- [ ] ADR 0006 (atomic escalation), architecture and plan updated
 
 Modules: `triaxis-triage-service`.
 
-Tests: overdue patient escalated once; second run is a no-op (no second event, no second audit row); `EN_CONSULTA` and `ALTA` patients never escalated; two concurrent runs produce one escalation; race between `PATCH` and scheduler has a single winner. Use second-level SLAs and a fake `Clock`.
+Tests that must exist: an overdue patient is escalated once and a second run does nothing (no second event, no second audit row); `EN_CONSULTA`, `ALTA` and already escalated patients are never selected; the limit is strict (exactly at the SLA is not escalated, one instant later is); oldest first and the batch size is respected; patient, audit and outbox event are committed together and rolled back together; two concurrent runs escalate each patient once; 25 rounds of a concurrent `PATCH` and escalation keep the invariant that an `ESCALATED` audit entry never follows a `CONSULTATION_STARTED` or `DISCHARGED` one; the event reaches Kafka with the level and `escalado = true`; the counter increments; BlockHound and ArchUnit stay green. Use a fake clock or back-dated patients, never real waiting.
 
-Definition of done: `./gradlew :triaxis-triage-service:test --tests '*Escalation*'`.
+Definition of done: `./gradlew build` passes, `scripts/check-docs.sh` passes, and a manual check with the compose infrastructure and an SLA of 1 minute shows the escalation in the audit, the outbox and Kafka.
 
-First commit: `feat(triage): escalate overdue patients atomically and idempotently`
+Suggested commits inside the branch: domain and application; persistence and scheduler; tests and documentation.
 
 ## Phase 5: Assistant
 
