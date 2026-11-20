@@ -150,7 +150,7 @@ dev.triaxis.triage
 │   ├── port.in          RegisterPatientUseCase, ChangePatientStatusUseCase, GetPatientUseCase,
 │   │                    EscalateOverduePatientsUseCase, GetOperationReportUseCase
 │   ├── port.out         PatientRepository, AuditRepository, EventPublisher, ClockPort,
-│   │                    IdGenerator, UnitOfWork, TriageMetrics  (later: ReportQuery, AlertNotifier)
+│   │                    IdGenerator, UnitOfWork, TriageMetrics, ReportQuery  (later: AlertNotifier)
 │   └── service          use case implementations
 ├── infrastructure
 │   ├── adapter.in
