@@ -14,7 +14,15 @@ See [docs/TECH_STACK.md](docs/TECH_STACK.md).
 
 ## How to run
 
-Requirements: JDK 21 and Docker. The full one-command run (all services in containers) arrives with the deployment phase; today the infrastructure runs in containers and the services run from Gradle.
+Requirement: Docker. One command builds the images and starts PostgreSQL, Kafka, Redis, Jaeger and the three services (verified):
+
+```bash
+docker compose up --build
+```
+
+The services answer on `localhost:8083` (auth), `8081` (triage) and `8082` (assistant); every port is published on `127.0.0.1` only. Stop with `docker compose down` (add `-v` to delete the data).
+
+For development with Gradle (JDK 21), start only the infrastructure and run the services from Gradle:
 
 ```bash
 docker compose up -d postgres kafka kafka-init redis jaeger
@@ -110,7 +118,31 @@ _TODO_
 
 ## Deployment
 
-Planned for phase 8 and not built yet: Azure Kubernetes Service with one node, PostgreSQL, Kafka and Redis inside the cluster, Kustomize manifests validated on kind, public images on GitHub Container Registry, and HTTPS with Let's Encrypt ([ADR 0010](docs/adr/0010-deployment-on-aks.md)). The database roles and the schema step are [ADR 0024](docs/adr/0024-database-roles-and-schema-outside-startup.md).
+Kubernetes manifests (Kustomize) are in [`deploy/k8s`](deploy/k8s): a base and the overlays `kind` (local validation) and `aks` (Azure). The decisions are in [ADR 0010](docs/adr/0010-deployment-on-aks.md).
+
+- **One node, everything inside:** the three services, PostgreSQL with pgvector, Kafka (KRaft) and Redis, with persistent volumes; Traefik is the ingress controller, with the paths `/auth`, `/.well-known/jwks.json`, `/triage` and `/asistente`. `/actuator` is not routed.
+- **Security:** the pods run without root, with a read-only file system; the Secret is created by `deploy/scripts/create-secrets.sh` from generated values and local files (never from the repository).
+
+**Local cluster (kind, verified):**
+
+```bash
+deploy/scripts/kind-up.sh          # builds the images, creates the cluster, the Secret and the workloads
+# the Ingress answers on http://localhost:8088, for example:
+curl -s -X POST localhost:8088/auth/token -H 'Content-Type: application/json' \
+  -d '{"username":"nurse","password":"nurse-demo"}'
+kind delete cluster --name triaxis
+```
+
+**Azure (AKS):** deployed at https://triaxis-demo.eastus2.cloudapp.azure.com (verified on 2026-11-20 with the sample flow over HTTPS and a question to Gemini; the credentials of the deployed users are handed over separately, the demo passwords are refused there). [Terraform](deploy/azure/terraform) creates the resource group, an AKS cluster with the free tier and one `Standard_D2as_v7` node (2 vCPU, 8 GiB) in `eastus2`, the static public IP with its DNS label, and an optional budget. Traefik gets a Let's Encrypt certificate for that host and redirects HTTP to HTTPS; the assistant uses Gemini with the key from the Secret.
+
+```bash
+cp deploy/azure/terraform/terraform.tfvars.example deploy/azure/terraform/terraform.tfvars   # set subscription_id
+deploy/azure/deploy.sh     # terraform apply, images to GHCR, Secret, kubectl apply -k deploy/k8s/overlays/aks
+deploy/azure/stop.sh       # stop the node between demonstrations; start.sh starts it again
+deploy/azure/destroy.sh    # delete everything
+```
+
+The scripts read local files outside the repository: `~/.config/triaxis/ghcr.env` (a GitHub token that can publish packages), `deploy.env` (the passwords of the deployed users) and `gemini.env`. The deployed URL is added here once it is live.
 
 ## Author
 

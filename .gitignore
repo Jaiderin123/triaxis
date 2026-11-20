@@ -50,3 +50,10 @@ Thumbs.db
 
 # Private and local-only files
 docs/private/
+
+# Terraform: local state (it holds the cluster credentials), variables with the subscription, provider cache
+deploy/azure/terraform/.terraform/
+deploy/azure/terraform/*.tfstate
+deploy/azure/terraform/*.tfstate.*
+deploy/azure/terraform/terraform.tfvars
+deploy/azure/terraform/*.tfplan

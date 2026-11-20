@@ -1,6 +1,6 @@
 # 0024. A database role per service, and the schema applied outside the startup
 
-- **Status:** Accepted
+- **Status:** Accepted, not implemented yet (deferred after the delivery of 2026-11-21, see the revision of ADR 0010)
 - **Date:** 2026-11-20
 - **Author:** Jaider Betancur Torres
 

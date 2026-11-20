@@ -39,12 +39,12 @@ The name must be checked on GitHub and Google before publishing, to avoid clashi
 
 | Area | Choice | Notes |
 |---|---|---|
-| Relational database | PostgreSQL 16 (`pgvector/pgvector:pg16` locally, `postgres:16-alpine` in tests; confirmed) | Must match a version supported by the Azure target |
+| Relational database | PostgreSQL 16 (`pgvector/pgvector:0.8.7-pg16-bookworm` in compose, Kubernetes and the assistant tests, `postgres:16.16-alpine3.23` in the triage tests; confirmed) | Must match a version supported by the Azure target |
 | Vector search | pgvector extension (`pgvector/pgvector` image) | Custom R2DBC repository, no `PgVectorStore` |
 | Database access | Spring Data R2DBC, `r2dbc-postgresql` | Schema created with init scripts (no Flyway/JDBC) |
 | Messaging | Apache Kafka 3.9, KRaft mode (`apache/kafka:3.9.1`, confirmed) | Topic: `triaje.eventos` |
 | Kafka client | Spring for Apache Kafka | Async `@KafkaListener` returning `Mono`, manual acknowledgment |
-| Cache / read model | Redis 7.4 (`redis:7.4-alpine`, confirmed) via Spring Data Redis Reactive | Urgency view rebuilt from events |
+| Cache / read model | Redis 7.4 (`redis:7.4.12-alpine3.22`, confirmed) via Spring Data Redis Reactive | Urgency view rebuilt from events |
 
 ## 4. AI
 
@@ -73,7 +73,7 @@ The name must be checked on GitHub and Google before publishing, to avoid clashi
 | Area | Choice |
 |---|---|
 | Unit and integration | JUnit 5, Reactor Test (`StepVerifier`) |
-| Infrastructure | Testcontainers (PostgreSQL `postgres:16-alpine` in triage and `pgvector/pgvector:pg16` in the assistant, Kafka, the `r2dbc` module for the R2DBC service connection) |
+| Infrastructure | Testcontainers (PostgreSQL `postgres:16.16-alpine3.23` in triage and `pgvector/pgvector:0.8.7-pg16-bookworm` in the assistant, Kafka, the `r2dbc` module for the R2DBC service connection) |
 | LLM | Mocked (never real calls in tests) |
 | Coverage | JaCoCo |
 | Mapping | MapStruct **1.6.3** (latest stable; 1.7 is still beta) | Generated mappers at the boundaries: DTO to command, entity to domain, domain to response |
@@ -90,10 +90,11 @@ The name must be checked on GitHub and Google before publishing, to avoid clashi
 | Containers | One Docker image per service, pinned base image tags (never `latest`) |
 | Local run | `docker-compose` that starts PostgreSQL, Kafka, Redis and all services with one command |
 | Orchestration | Kubernetes manifests (Deployment, Service, probes) |
-| Cloud | Azure Kubernetes Service, one node, with PostgreSQL, Kafka and Redis in the cluster (ADR 0010; phase 8) |
-| Images | Multi-stage Dockerfiles (JDK 21 build, JRE 21 runtime, exact tags), public on GitHub Container Registry (phase 8) |
-| Manifests | Kustomize base with `kind` and `aks` overlays, built into `kubectl` (phase 8) |
-| Ingress and TLS | A maintained ingress controller (Traefik preferred) and cert-manager with Let's Encrypt; versions pinned when phase 8 starts |
+| Cloud | Azure Kubernetes Service, free tier, one `Standard_D2as_v7` node (2 vCPU, 8 GiB) in `eastus2`, with PostgreSQL, Kafka and Redis in the cluster (ADR 0010) |
+| Images | One multi-stage Dockerfile for the three services (`docker/service.Dockerfile`, `--build-arg SERVICE`): `eclipse-temurin:21.0.10_7-jdk-noble` to build, `eclipse-temurin:21.0.10_7-jre-noble` to run, as uid 10001; public on GitHub Container Registry |
+| Manifests | Kustomize base with `kind` and `aks` overlays (`kubectl apply -k`, Kustomize v5.7.1 of kubectl 1.34.13); kind 0.33.0 for the local validation |
+| Infrastructure as code | Terraform 1.9.0 with the `hashicorp/azurerm` provider 4.81.0 (`deploy/azure/terraform`, lock file versioned) |
+| Ingress and TLS | Traefik `v3.7.19` with the standard `Ingress` provider; HTTPS from its built-in Let's Encrypt resolver (HTTP-01) |
 | Local cluster validation | kind / minikube / k3d |
 
 ## 8. Version management rule

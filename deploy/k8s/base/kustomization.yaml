@@ -1,0 +1,26 @@
+# Base of the deployment (ADR 0010). Overlays: ../overlays/kind (local validation) and ../overlays/aks (Azure).
+# The Secret triaxis-secrets is not here: deploy/scripts/create-secrets.sh creates it from the environment.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: triaxis
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: triaxis
+resources:
+  - namespace.yaml
+  - config.yaml
+  - postgres.yaml
+  - kafka.yaml
+  - redis.yaml
+  - auth.yaml
+  - triage.yaml
+  - assistant.yaml
+  - traefik.yaml
+  - ingress.yaml
+images:
+  - name: triaxis-auth
+    newTag: local
+  - name: triaxis-triage
+    newTag: local
+  - name: triaxis-assistant
+    newTag: local

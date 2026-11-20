@@ -1,6 +1,6 @@
 # 0010. Deployment on a single-node AKS cluster, with the state in the cluster and the cost under control
 
-- **Status:** Accepted
+- **Status:** Accepted (revised on 2026-11-20 when phase 8 was built; see the revision at the end)
 - **Date:** 2026-11-20
 - **Author:** Jaider Betancur Torres
 
@@ -39,3 +39,14 @@ The requirements specification asks for a system deployed on Azure with the APIs
 - Starting the demonstration needs the cluster to be started; the first request after a start is slower.
 - The Gemini key is a Secret of the cluster; a quota or an outage of Gemini is visible as the 503 of the degraded mode.
 - Prerequisites outside the repository: an Azure subscription with quota for the node size, the Azure CLI, a GitHub token that can publish packages, and the Gemini key.
+
+## Revision of 2026-11-20 (implementation of phase 8)
+
+Approved with the owner of the project when the phase was built, the day before the delivery:
+
+- **Infrastructure as code: Terraform instead of Azure CLI scripts.** `deploy/azure/terraform` creates the resource group, the AKS cluster (free tier, one node), the static public IP with its DNS label in the node resource group, and an optional budget. It is declarative and a recognizable IaC for the reader; Terraform 1.9.0 was already installed. The state is local and git-ignored, because it holds the credentials of the cluster. Small scripts in `deploy/azure/` wrap it (`deploy.sh`, `stop.sh`, `start.sh`, `destroy.sh`, `push-images.sh`).
+- **TLS from Traefik instead of cert-manager.** Traefik `v3.7.19` is the ingress controller, and its built-in Let's Encrypt resolver (HTTP-01 on the web entry point, certificate stored on a small persistent volume) gives the same HTTPS with one component less on a node of 8 GiB. Traefik is installed by the manifests of the base, so kind and AKS use the same controller.
+- **One shared Dockerfile.** `docker/service.Dockerfile` builds any of the three services with `--build-arg SERVICE`, because the three images are built the same way from the root of the repository.
+- **Size and region.** `Standard_D2as_v7` (2 vCPU, 8 GiB, AMD, not burstable) in `eastus2`. The first choice, `Standard_B2ms`, is not offered to the free trial subscription: on 2026-11-20 no B-series size was listed for it in `eastus2`, `eastus`, `centralus`, `southcentralus`, `westus2` or `westus3`. `Standard_D2as_v7` is offered in `eastus2` with quota, and its retail price that day was USD 0.0908 per hour against 0.0832 for `Standard_B2ms`; it does not depend on CPU credits. The size has no temporary disk and only an NVMe disk controller, so the OS disk is managed (no ephemeral OS disk).
+- **Cost during the evaluation.** The cluster is created and checked shortly before the delivery, stopped until the repository is handed in, then left running for the whole review window so the URL always answers, and deleted at the end.
+- **Deferred to after the delivery.** The database roles and the schema step of ADR 0024, and the rate limit that trusts only the forwarded address of the Ingress: the deployment uses the superuser of the PostgreSQL container and the rate limit per address of A28.

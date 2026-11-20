@@ -1,0 +1,7 @@
+# Copy to terraform.tfvars (git-ignored) and fill in. Never commit terraform.tfvars or the state.
+subscription_id = "00000000-0000-0000-0000-000000000000"
+# location            = "eastus2"
+# node_size           = "Standard_D2as_v7"
+# dns_label           = "triaxis-demo"
+# budget_amount       = 30
+# budget_contact_email = "you@example.org"

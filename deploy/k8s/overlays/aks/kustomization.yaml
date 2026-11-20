@@ -1,0 +1,101 @@
+# Azure (ADR 0010): public images on GHCR, Gemini for the assistant (A16), the static public IP created by
+# Terraform (deploy/azure/terraform) and HTTPS with Let's Encrypt on its DNS label (A48).
+# The host name is set once, in the settings below, and copied into the Ingress.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Resources added here (the ACME volume) get the namespace of the base too.
+namespace: triaxis
+resources:
+  - ../../base
+  - acme-volume.yaml
+images:
+  - name: triaxis-auth
+    newName: ghcr.io/jaiderin123/triaxis-auth
+    newTag: 0.8.0
+  - name: triaxis-triage
+    newName: ghcr.io/jaiderin123/triaxis-triage
+    newTag: 0.8.0
+  - name: triaxis-assistant
+    newName: ghcr.io/jaiderin123/triaxis-assistant
+    newTag: 0.8.0
+configMapGenerator:
+  - name: aks-settings
+    options:
+      disableNameSuffixHash: true
+    literals:
+      # Must match the DNS label and the region of deploy/azure/terraform (terraform output fqdn).
+      - host=triaxis-demo.eastus2.cloudapp.azure.com
+replacements:
+  - source: {kind: ConfigMap, name: aks-settings, fieldPath: data.host}
+    targets:
+      - select: {kind: Ingress, name: triaxis}
+        fieldPaths:
+          - spec.rules.0.host
+        options:
+          create: true
+patches:
+  - target: {kind: ConfigMap, name: triaxis-config}
+    patch: |-
+      - op: replace
+        path: /data/ASSISTANT_PROFILES
+        value: gemini
+  # The static public IP of Terraform (same name, in the node resource group); Local keeps the client address.
+  - target: {kind: Service, name: traefik}
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          service.beta.kubernetes.io/azure-pip-name: triaxis-ingress-ip
+      - op: add
+        path: /spec/externalTrafficPolicy
+        value: Local
+  # Let's Encrypt through the HTTP-01 challenge on :80, then every HTTP request is redirected to HTTPS.
+  - target: {kind: Deployment, name: traefik}
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: --certificatesresolvers.letsencrypt.acme.storage=/acme/acme.json
+      # Redirect to the public port 443, not to the websecure entry point: that would put its container
+      # port (8443) in the Location header, and only 443 is published by the Service.
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: --entryPoints.web.http.redirections.entryPoint.to=:443
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: --entryPoints.web.http.redirections.entryPoint.scheme=https
+      - op: replace
+        path: /spec/template/spec/volumes/0
+        value:
+          name: acme
+          persistentVolumeClaim:
+            claimName: traefik-acme
+      # The fsGroup of the pod makes acme.json group-readable on every mount (660), and Traefik then skips the
+      # resolver ("permissions 660 are too open"). Reset it to 600 before Traefik starts.
+      - op: add
+        path: /spec/template/spec/initContainers
+        value:
+          - name: acme-permissions
+            image: traefik:v3.7.19
+            command: ["sh", "-c", "if [ -f /acme/acme.json ]; then chmod 600 /acme/acme.json; fi"]
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: ["ALL"]
+            resources:
+              requests: {cpu: 10m, memory: 16Mi}
+              limits: {memory: 32Mi}
+            volumeMounts:
+              - name: acme
+                mountPath: /acme
+  - target: {kind: Ingress, name: triaxis}
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          traefik.ingress.kubernetes.io/router.entrypoints: websecure
+          traefik.ingress.kubernetes.io/router.tls: "true"
+          traefik.ingress.kubernetes.io/router.tls.certresolver: letsencrypt
