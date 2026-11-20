@@ -17,7 +17,7 @@ See [docs/TECH_STACK.md](docs/TECH_STACK.md).
 Requirements: JDK 21 and Docker. The full one-command run (all services in containers) arrives with the deployment phase; today the infrastructure runs in containers and the services run from Gradle.
 
 ```bash
-docker compose up -d postgres kafka kafka-init jaeger   # add redis when the assistant needs it
+docker compose up -d postgres kafka kafka-init redis jaeger
 
 # in separate terminals (JAVA_HOME must point to a JDK 21)
 ./gradlew :triaxis-auth-service:bootRun --args='--spring.profiles.active=local'
@@ -70,6 +70,7 @@ Everything is configured through environment variables; nothing secret is in the
 | triage (8081) | `PATCH /triage/pacientes/{id}/estado` | `NURSE`, `DOCTOR` |
 | triage (8081) | `GET /triage/pacientes/{id}` | `NURSE`, `DOCTOR` |
 | assistant (8082) | `POST /asistente/consulta` with `{ "pregunta": "..." }` | `DOCTOR` |
+| assistant (8082) | `GET /asistente/estado-urgencias`: active patients per level, built only from the Kafka events | `NURSE`, `DOCTOR` |
 
 The assistant answers only from the clinical protocols, with the cited `fuentes` taken from the corpus. When no protocol applies it answers `No existe un protocolo disponible para esta pregunta.` with empty `fuentes`, and when the language model is unavailable it answers 503 (ADRs 0004 and 0007).
 
@@ -80,7 +81,7 @@ curl -s -X POST localhost:8082/asistente/consulta -H "Authorization: Bearer $TOK
   -H 'Content-Type: application/json' -d '{"pregunta":"¿Cuándo se administra el primer antibiótico en sepsis?"}'
 ```
 
-More endpoints (urgency view, report) are added in later phases. Assumptions and ambiguities of the specification are in [docs/ASSUMPTIONS.md](docs/ASSUMPTIONS.md).
+More endpoints (operation report) are added in later phases. Assumptions and ambiguities of the specification are in [docs/ASSUMPTIONS.md](docs/ASSUMPTIONS.md).
 
 ## Decisions
 
