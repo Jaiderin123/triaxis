@@ -11,7 +11,7 @@ Triaxis is a reactive digital triage system with a clinical assistant. Nurses re
 | Phased checklist (what to do next) | `docs/PLAN.md` |
 | Assumptions and ambiguities | `docs/ASSUMPTIONS.md` |
 | Git and commit conventions | `docs/GIT_WORKFLOW.md` |
-| Decision records | `docs/adr/` (README, template and ADRs 0001 to 0009 and 0011 to 0023 exist; the status of the rest is in `ARCHITECTURE.md` section 14) |
+| Decision records | `docs/adr/` (README, template and ADRs 0001 to 0024 exist; their status is in `ARCHITECTURE.md` section 14) |
 | Original requirements (RF-xx, RN-xx), Spanish | `docs/private/ASSIGNMENT.md` (local only, git-ignored) |
 
 ## Modules
@@ -25,7 +25,7 @@ Triaxis is a reactive digital triage system with a clinical assistant. Nurses re
 | `triaxis-security` | n/a | Library: shared resource-server (JWT) configuration |
 | `triaxis-web` | n/a | Library: standard error responses, access log, protected metrics, tracing (no business logic) |
 
-All six modules exist on Spring Boot 3.5.16 and `./gradlew build` passes. Done and released to `main`: the auth service and shared security (phase 1), the triage core with the audit (phase 2), the events through a transactional outbox with an ordered relay to Kafka (phase 3), the platform foundation (standard errors, OpenTelemetry, JSON logs, protected metrics, hardening), the SLA escalation (phase 4), the assistant (phase 5: RAG with validated citations, the degraded mode, the urgency view from Kafka in Redis), the fixes of the review of 2026-11-19 (ADR 0022), the operation report (phase 6: one SQL query with window functions), and the alerts to the medical team (phase 7: a Kafka listener with a log or webhook channel, ADR 0011 and 0023). Next: the deployment (phase 8). The status table and the resume notes are in `docs/PLAN.md`.
+All six modules exist on Spring Boot 3.5.16 and `./gradlew build` passes. Done and released to `main`: the auth service and shared security (phase 1), the triage core with the audit (phase 2), the events through a transactional outbox with an ordered relay to Kafka (phase 3), the platform foundation (standard errors, OpenTelemetry, JSON logs, protected metrics, hardening), the SLA escalation (phase 4), the assistant (phase 5: RAG with validated citations, the degraded mode, the urgency view from Kafka in Redis), the fixes of the review of 2026-11-19 (ADR 0022), the operation report (phase 6: one SQL query with window functions), and the alerts to the medical team (phase 7: a Kafka listener with a log or webhook channel, ADR 0011 and 0023). Next: the deployment (phase 8), planned and approved (ADR 0010 and 0024), starting once the Azure account is ready. The status table and the resume notes are in `docs/PLAN.md`.
 
 ## Package layout (hexagonal, per service)
 
@@ -133,7 +133,7 @@ export JAVA_HOME=$HOME/.jdks/temurin-21.0.10
 docker compose up -d                              # PostgreSQL (pgvector), Kafka (topic triaje.eventos), Redis (verified); services are added in phase 8
 docker compose up -d postgres kafka kafka-init jaeger   # triage with the relay and traces; Jaeger UI on http://localhost:16686 (verified)
 curl -u metrics:metrics-local localhost:8081/actuator/prometheus   # metrics with the local profile password (verified)
-kubectl apply -f deploy/k8s/                      # manifests (not created yet; kubectl 1.34.13 and kind 0.33.0 are in ~/.local/bin; az is not installed)
+kubectl apply -k deploy/k8s/overlays/kind         # manifests (planned in phase 8, not created yet; kubectl 1.34.13 and kind 0.33.0 are in ~/.local/bin; az is not installed)
 ```
 
 JaCoCo reports are produced after `test` (root `build.gradle`).
