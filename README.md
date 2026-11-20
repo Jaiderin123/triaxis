@@ -110,7 +110,7 @@ _TODO_
 
 ## Deployment
 
-_TODO_
+Planned for phase 8 and not built yet: Azure Kubernetes Service with one node, PostgreSQL, Kafka and Redis inside the cluster, Kustomize manifests validated on kind, public images on GitHub Container Registry, and HTTPS with Let's Encrypt ([ADR 0010](docs/adr/0010-deployment-on-aks.md)). The database roles and the schema step are [ADR 0024](docs/adr/0024-database-roles-and-schema-outside-startup.md).
 
 ## Author
 

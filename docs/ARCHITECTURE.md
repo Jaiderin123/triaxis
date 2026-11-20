@@ -330,7 +330,7 @@ CREATE TABLE alert_deliveries (            -- escalation events already alerted 
 );
 ```
 
-The schema is created by initialization scripts executed through R2DBC (no Flyway, to avoid a second JDBC driver). Every R2DBC session runs in UTC, with `statement_timeout` 10 s and `lock_timeout` 5 s, set by a `ConnectionFactoryOptionsBuilderCustomizer` (`R2dbcSessionConfiguration`, ADR 0022); the tests run in a non-UTC JVM and check it. `patient_audit.patient_id` references `patients (id)`.
+The schema is created by initialization scripts executed through R2DBC (no Flyway, to avoid a second JDBC driver). Today each service runs its script at startup with the superuser of the container; phase 8 moves it to a separate step with an owner role and gives each service a least-privilege role (ADR 0024). Every R2DBC session runs in UTC, with `statement_timeout` 10 s and `lock_timeout` 5 s, set by a `ConnectionFactoryOptionsBuilderCustomizer` (`R2dbcSessionConfiguration`, ADR 0022); the tests run in a non-UTC JVM and check it. `patient_audit.patient_id` references `patients (id)`.
 
 ### 6.5 Events and the transactional outbox
 
@@ -732,7 +732,17 @@ Minimum coverage required: classification E1 to E6, valid and invalid transition
 
 **Kubernetes manifests (`deploy/k8s/`):** namespace; Deployments for the three services with liveness and readiness probes and resource requests and limits; PostgreSQL, Kafka and Redis (single replica, with persistent volumes where needed); Services; ConfigMap and Secrets; one Ingress with path-based routing (`/auth`, `/triage`, `/asistente`). The same manifests are validated locally on kind or minikube. Rules that already apply to the images and manifests: configuration only through environment variables (table in section 10), graceful shutdown, readiness without Kafka for triage, `/actuator` not routed by the Ingress, a Secret for the metrics credentials, the signing key and the database passwords, non-root containers and pinned base image tags.
 
-**Azure (target, to confirm):** AKS with a single node, running the stateful pieces in the cluster to keep cost low (managed alternatives such as Event Hubs with a Kafka endpoint, Azure Cache for Redis and Azure Database for PostgreSQL cost more and add configuration). Images from a registry reachable by the cluster. Budget alert configured, resource group deleted when the demonstration ends. Costs and node sizing must be checked before choosing. Observability in Azure: Container Insights for the logs of standard output, a Prometheus scrape of `/actuator/prometheus` with the Secret credentials (Azure Monitor managed Prometheus or an in-cluster Prometheus), and an OTLP endpoint for traces (Application Insights or Jaeger); all optional for the deliverable and decided in the deployment ADR.
+**Azure (decided in ADR 0010, implemented in phase 8; not deployed yet):**
+
+- AKS with the free tier of the control plane and one node of about 8 GiB (size, region and price confirmed with the Azure calculator and the quota before the cluster is created).
+- PostgreSQL, Kafka and Redis run in the cluster as single-replica StatefulSets with persistent volumes; one replica of each service (the assistant must run as one, A39).
+- `deploy/k8s/` is a Kustomize base with the overlays `kind` and `aks` (`kubectl apply -k`).
+- Public images on GitHub Container Registry, built by a multi-stage Dockerfile per service (JDK 21 to build, JRE 21 to run, exact tags, non-root).
+- A maintained ingress controller (Traefik preferred) with the standard `Ingress` resource, an Azure DNS label as the host and a Let's Encrypt certificate from cert-manager; `/actuator` is not routed.
+- The assistant uses Gemini with `GEMINI_API_KEY` from a Secret (A16); alerts use the log channel (ADR 0011).
+- Secrets are created by a script from environment variables; the Azure CLI scripts of `deploy/azure/` create and delete the resources.
+- The schema is applied by a Job with the owner role of each database and the services use least-privilege roles (ADR 0024).
+- Cost control: a budget alert, the cluster stopped outside the demonstrations, the resource group deleted at the end; no Container Insights, and the Prometheus scrape and the export of traces stay optional and off.
 
 **CI (stretch):** GitHub Actions workflow that builds and runs the tests on every push.
 
@@ -744,7 +754,7 @@ Minimum coverage required: classification E1 to E6, valid and invalid transition
 |---|---|---|---|
 | 1 | Where and how alerts are sent (RF-06) | Kafka-driven notifier inside `triage-service`, webhook plus log adapter | Dedicated `notification-service`, email, SSE |
 | 2 | Event publication | **Decided:** transactional outbox (ADR 0005) | Publish after commit with retry (faster to build) |
-| 3 | Azure compute | AKS single node with in-cluster PostgreSQL, Kafka and Redis | Azure Container Apps, managed services |
+| 3 | Azure compute | **Decided:** AKS with one node and in-cluster PostgreSQL, Kafka and Redis (ADR 0010) | Azure Container Apps, managed services |
 | 4 | Level 5 complaint matching | **Decided:** normalized exact match (ASSUMPTIONS A3) | Contains match |
 
 ---
@@ -764,7 +774,7 @@ Status `written` means the file exists in `docs/adr/` (checked by `scripts/check
 | 0007 | Anti-hallucination strategy (retrieval gate, validated citations) | written |
 | 0008 | Gemini for LLM and embeddings; Ollama and DeepSeek discarded | written |
 | 0009 | Spring Boot 3.5 / Spring AI 1.1 out of OSS support, chosen on purpose | written |
-| 0010 | Deployment strategy and cost control on Azure | pending (deployment) |
+| 0010 | Deployment on a single-node AKS cluster, with the state in the cluster and the cost under control (implemented in phase 8) | written |
 | 0011 | Alert channel for escalated patients | written |
 | 0012 | Functional endpoints (`RouterFunction`) instead of annotated controllers | written |
 | 0013 | Who may change a patient's state (`NURSE` and `DOCTOR`), an ambiguity of the specification | written |
@@ -778,6 +788,7 @@ Status `written` means the file exists in `docs/adr/` (checked by `scripts/check
 | 0021 | Idempotent urgency view that tolerates missing, repeated and late events | written |
 | 0022 | Deny by default, bounded waits and UTC sessions (from the review of 2026-11-19) | written |
 | 0023 | Alerts only for patients that still wait (partly supersedes 0011) | written |
+| 0024 | A database role per service, and the schema applied outside the startup (implemented in phase 8) | written |
 
 At least two are required; the more concrete ones (0001, 0002, 0006, 0007) are the priority.
 

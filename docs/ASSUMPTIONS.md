@@ -107,7 +107,7 @@ A1 to A4 come from `ARCHITECTURE.md` section 6.2. A5 onward were added while pre
 ## A16. LLM profile in the deployed environment
 
 - **Ambiguity:** the specification asks for a deployed, reachable system but does not say whether it must use a real LLM.
-- **Decision:** not decided. Local and test runs use the `mock` profile. For the deployed environment either keep `mock` (no key, no cost, deterministic) or enable Gemini through a Kubernetes Secret. To be chosen in phase 8 and recorded in ADR 0008 or 0010.
+- **Decision:** local and test runs use the `mock` profile. The deployed environment uses Gemini (`gemini` profile) with `GEMINI_API_KEY` from a Kubernetes Secret (decided while planning phase 8, ADR 0010); when Gemini fails, the degraded mode answers 503 (ADR 0004), and going back to `mock` is a change of the profile only.
 - **Why:** a real model shows the RAG working, but adds a secret, cost and a failure point.
 - **Impact if wrong:** a client may expect real generated answers; or a missing key may break the demo.
 
@@ -317,3 +317,17 @@ A1 to A4 come from `ARCHITECTURE.md` section 6.2. A5 onward were added while pre
 - **Decision:** the group starts from the oldest retained event (`auto.offset.reset=earliest`), so no escalation is lost. Before sending, the patient is read: a patient that no longer waits (in consultation or discharged) is not alerted and the event is recorded as `SKIPPED`; a patient that still waits is alerted however old the event is (ADR 0023).
 - **Why:** the manual check of phase 7 showed that a new group replays the retained escalations, including patients already attended; an alert must reach the team only while it can still help.
 - **Impact if wrong:** a patient attended while the listener was down gets no alert at all (intended), and the status is read at handling time, so a patient that enters consultation a moment later is still alerted.
+
+## A47. The deployed environment is a demonstration
+
+- **Ambiguity:** the specification asks for a deployment on Azure with the APIs reachable, but says nothing about availability, backups or the size of the load.
+- **Decision:** one AKS node, one replica of each service, and PostgreSQL, Kafka and Redis in the cluster on single persistent volumes, with no backups. The cluster is stopped outside the demonstrations and the resource group is deleted when the evaluation ends (ADR 0010).
+- **Why:** it shows the system running on Kubernetes at the lowest cost; high availability would multiply the nodes and the managed services.
+- **Impact if wrong:** a lost node or volume loses the data, and a stopped cluster does not answer until it is started. Moving to managed services changes the connection settings only.
+
+## A48. Public address of the deployment
+
+- **Ambiguity:** "a reachable URL" does not say which host name or whether it uses TLS.
+- **Decision:** the host name is the free DNS label of the public IP in Azure (`<label>.<region>.cloudapp.azure.com`), served over HTTPS with a Let's Encrypt certificate from cert-manager. The paths are those of the local run (`/auth`, `/.well-known/jwks.json`, `/triage`, `/asistente`); `/actuator` is not public. The issuer of the tokens stays `triaxis-auth` (a name, not an address), and the services read the JWKS from auth inside the cluster (`AUTH_JWKS_URI`), without leaving it.
+- **Why:** the tokens must not travel in clear over the internet, and no domain has to be bought.
+- **Impact if wrong:** a custom domain is a change of the overlay and the certificate only.
