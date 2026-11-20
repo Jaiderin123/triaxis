@@ -1,6 +1,7 @@
 package dev.triaxis.security;
 
 import java.security.interfaces.RSAPublicKey;
+import java.time.Clock;
 import java.util.List;
 
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
@@ -21,9 +22,16 @@ public final class TriaxisJwtDecoders {
 	private TriaxisJwtDecoders() {
 	}
 
-	/** Decoder that downloads the signing keys from a JWKS endpoint on first use. */
+	/** Decoder that downloads the signing keys from a JWKS endpoint on first use, with the default limits. */
 	public static ReactiveJwtDecoder fromJwkSetUri(String jwkSetUri, String issuer, String audience) {
-		NimbusReactiveJwtDecoder decoder = NimbusReactiveJwtDecoder.withJwkSetUri(jwkSetUri)
+		return fromJwkSetUri(jwkSetUri, issuer, audience, JwksSettings.defaults());
+	}
+
+	/** Decoder that downloads the signing keys from a JWKS endpoint on first use, with timeouts (ADR 0003). */
+	public static ReactiveJwtDecoder fromJwkSetUri(String jwkSetUri, String issuer, String audience,
+			JwksSettings jwks) {
+		NimbusReactiveJwtDecoder decoder = NimbusReactiveJwtDecoder
+				.withJwkSource(new JwksKeySource(jwkSetUri, jwks, Clock.systemUTC()))
 				.jwsAlgorithm(SignatureAlgorithm.RS256)
 				.build();
 		decoder.setJwtValidator(validator(issuer, audience));
