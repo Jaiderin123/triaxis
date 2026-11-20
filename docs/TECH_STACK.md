@@ -114,11 +114,11 @@ BlockHound on JDK 13+ needs the JVM flag `-XX:+AllowRedefinitionToAddDeleteMetho
 
 ## 10. Decisions recorded as ADRs
 
-The stack decisions are recorded in `docs/adr/`: Spring Kafka (0001), the custom R2DBC vector repository (0002), the identity service (0003), the degraded mode of the assistant (0004), Gemini with the `mock` provider (0008), Spring Boot 3.5 and Spring AI 1.1 (0009), and the defaults of the review (0022: deny by default, bounded waits, UTC sessions). Still to write: the Azure deployment and cost control (0010, phase 8) and the alert channel (0011, phase 7). The full list and status are in `ARCHITECTURE.md` section 14.
+The stack decisions are recorded in `docs/adr/`: Spring Kafka (0001), the custom R2DBC vector repository (0002), the identity service (0003), the degraded mode of the assistant (0004), Gemini with the `mock` provider (0008), Spring Boot 3.5 and Spring AI 1.1 (0009), and the defaults of the review (0022: deny by default, bounded waits, UTC sessions). The alert channel is ADR 0011. Still to write: the Azure deployment and cost control (0010, phase 8). The full list and status are in `ARCHITECTURE.md` section 14.
 
 ## 11. Open items
 
 - [x] Confirm exact versions (done as they were adopted; recheck image tags before the deployment).
 - [ ] Choose Azure Container Apps or AKS, and how Kafka, PostgreSQL and Redis run there.
-- [ ] Choose the alert channel and format for escalations.
+- [x] Choose the alert channel and format for escalations (ADR 0011).
 - [x] Calibrate the similarity threshold with the Gemini embedding model (0.33, ASSUMPTIONS A36).

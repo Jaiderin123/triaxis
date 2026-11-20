@@ -24,6 +24,7 @@ Ambiguities in the requirements specification that change behavior are recorded 
 | 0007 | [Anti-hallucination strategy: retrieval gate, constrained prompt and validated citations](0007-anti-hallucination.md) | Accepted |
 | 0008 | [Gemini for answers and embeddings, with a deterministic `mock` provider by default](0008-gemini-and-mock-provider.md) | Accepted |
 | 0009 | [Spring Boot 3.5 and Spring AI 1.1, chosen on purpose](0009-spring-boot-3-5-and-spring-ai-1-1.md) | Accepted |
+| 0011 | [Alerts to the medical team: a Kafka listener with a log or webhook notifier](0011-alert-channel.md) | Accepted |
 | 0012 | [Functional endpoints instead of annotated controllers](0012-functional-endpoints.md) | Accepted |
 | 0013 | [Who may change a patient's state](0013-state-change-roles.md) | Accepted |
 | 0014 | [Clinical audit trail](0014-clinical-audit-trail.md) | Accepted |
