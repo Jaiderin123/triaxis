@@ -17,7 +17,7 @@ public class TestcontainersConfiguration {
 	@ServiceConnection
 	PostgreSQLContainer<?> postgresContainer() {
 		return new PostgreSQLContainer<>(
-				DockerImageName.parse("pgvector/pgvector:pg16").asCompatibleSubstituteFor("postgres"));
+				DockerImageName.parse("pgvector/pgvector:0.8.7-pg16-bookworm").asCompatibleSubstituteFor("postgres"));
 	}
 
 	@Bean
@@ -29,7 +29,7 @@ public class TestcontainersConfiguration {
 	@Bean
 	@ServiceConnection(name = "redis")
 	GenericContainer<?> redisContainer() {
-		return new GenericContainer<>(DockerImageName.parse("redis:7.4-alpine")).withExposedPorts(6379);
+		return new GenericContainer<>(DockerImageName.parse("redis:7.4.12-alpine3.22")).withExposedPorts(6379);
 	}
 
 }
