@@ -475,11 +475,11 @@ Defense in depth, so no single layer is trusted alone:
 3. **Validated citations.** The sources in the response are built from corpus metadata (protocol id and section) for the ids the model reports, never from free text written by the model. If the model returns no valid id, or an id that was not retrieved, the answer is rejected and replaced by the fixed notice (a metric counts rejections).
 4. **No clinical content in the fallback.** Fixed notices contain no generated medical text.
 
-The similarity threshold depends on the embedding model and is calibrated with the three sample questions (hypertension, sepsis, diabetes).
+The similarity threshold depends on the embedding model and is calibrated with the three sample questions (hypertension, sepsis, diabetes). Retrieval returns the top `assistant.rag.top-k` chunks (4), and only those within `assistant.rag.max-distance` are sent to the model, numbered `[1]`, `[2]`, and so on. The model answers in Spanish with JSON (`answer` and the list of excerpt numbers used, or `NO_PROTOCOL`). The `mock` provider (default) uses deterministic embeddings (normalized bag of words) and an extractive answer that copies the best excerpt, so it never writes clinical text of its own either. The threshold of the `mock` provider is calibrated in phase 5; the one of Gemini when a key is available (phase 8, ASSUMPTIONS A16).
 
 ### 7.3 Corpus and persistence
 
-Protocol files live in `src/main/resources/protocols/` (one per protocol, extendable). At startup an **idempotent ingestion** splits each protocol by section, and stores chunks only when missing or when the content hash or embedding model changed.
+Protocol files live in `src/main/resources/protocols/` (one Markdown file per protocol, `PROTO-001.md` to `PROTO-003.md`, extendable): a `#` title line with the protocol id and name, and one `##` heading per section. At startup an **idempotent ingestion** splits each protocol by section (one chunk per section, id `PROTO-001#medidas-iniciales`), and embeds and stores a chunk only when it is missing or its content hash or embedding model changed; chunks of removed sections are deleted.
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
@@ -518,19 +518,38 @@ Resilience4j circuit breaker `llm` wraps both the embedding and the chat call, w
 
 The assistant **never calls the triage API**. A consumer in its own group (`assistant-urgency-view`) maintains a Redis read model:
 
-- `urgency:patient:{id}` (hash: level, active) and `urgency:counters` (hash: level to count).
-- A **Lua script** applies each event atomically and idempotently: on `paciente_registrado`, if the patient is unknown, store it and increment its level; on `paciente_alta`, if the patient is active, mark inactive and decrement; `paciente_en_consulta` and `paciente_escalado` do not change counts (the patient is still active).
-- Offsets are committed only after the script succeeds (manual ack). Duplicates are harmless.
-- If Redis is lost, the view is rebuilt by replaying the topic from the earliest offset.
+- `urgency:patient:{id}` (hash: level, state `active` or `discharged`), `urgency:counters` (hash: level to count) and `urgency:meta` (time of the newest applied event).
+- A **Lua script** applies each event atomically and idempotently (ADR 0021):
 
-`GET /asistente/estado-urgencias` returns all five levels (zeros included) and a total.
+| Event | Patient unknown | Patient active | Patient discharged |
+|---|---|---|---|
+| `paciente_registrado`, `paciente_en_consulta`, `paciente_escalado` | store as active with the event level, add 1 | no change | no change |
+| `paciente_alta` | store as discharged, no count change | mark discharged, subtract 1 | no change |
+
+- Discharged is final; its key expires after `assistant.urgency.discharged-ttl` (30 days, longer than the topic retention), so a replay never counts a discharged patient again.
+- Offsets are committed only after the script succeeds (manual ack). Duplicates, replays and a late start are harmless.
+- If Redis is lost (no `urgency:meta` key at startup), the consumer reads the topic again from the earliest offset and the same rules rebuild the counts.
+
+`GET /asistente/estado-urgencias` returns all five levels (zeros included), a total and the time of the newest applied event:
+
+```json
+{
+  "porNivel": { "CRITICO": 1, "URGENTE": 2, "URGENTE_2": 0, "NO_URGENTE": 3, "NO_URGENTE_2": 1 },
+  "total": 7,
+  "actualizadoEn": "2026-11-20T15:30:00Z"
+}
+```
+
+`actualizadoEn` is null while no event was applied.
 
 ### 7.6 API contract
 
 | Method and path | Role | Success | Errors |
 |---|---|---|---|
-| `POST /asistente/consulta` body `{ "pregunta": "..." }` | DOCTOR | 200 `{ "respuesta": "...", "fuentes": [ { "protocolo": "PROTO-001", "seccion": "..." } ] }`. If no protocol applies: 200 with the "no protocol available" notice and empty `fuentes` | 400 (blank question), 503 (LLM unavailable) |
-| `GET /asistente/estado-urgencias` | NURSE, DOCTOR | 200: counts per level for patients not discharged | n/a |
+| `POST /asistente/consulta` body `{ "pregunta": "..." }` | DOCTOR | 200 `{ "respuesta": "...", "fuentes": [ { "protocolo": "PROTO-001", "seccion": "..." } ] }`. If no protocol applies: 200 with `respuesta` = "No existe un protocolo disponible para esta pregunta." and `fuentes: []` | 400 (blank question or longer than 1000 characters), 401, 403, 503 (LLM unavailable) |
+| `GET /asistente/estado-urgencias` | NURSE, DOCTOR | 200 `{ "porNivel": {...five levels...}, "total": n, "actualizadoEn": "..." }` (section 7.5) | 401, 403 |
+
+`seccion` is the section title as written in the corpus (for example `Medidas iniciales`). Errors use the shared RFC 7807 format (section 10).
 
 ---
 
@@ -601,8 +620,10 @@ Event types: `paciente_registrado`, `paciente_en_consulta`, `paciente_alta`, `pa
 | `METRICS_USER`, `METRICS_PASSWORD` | all | Credentials of the metrics scraper |
 | `TRACING_EXPORT_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `TRACING_SAMPLING_PROBABILITY` | all | OpenTelemetry export |
 | `assistant.rag.top-k`, `assistant.rag.max-distance` | assistant | Retrieval tuning (phase 5) |
-| `assistant.llm.provider` (`gemini` or `mock`), `GEMINI_API_KEY` | assistant | LLM selection and key (environment only) |
-| Redis coordinates | assistant | Urgency view (phase 5) |
+| `assistant.llm.provider` (`gemini` or `mock`), `GEMINI_API_KEY`, `assistant.llm.chat-model`, `assistant.llm.embedding-model` | assistant | LLM selection, models and key (key from the environment only); with `mock` the Gemini auto-configuration is off (`spring.ai.model.chat=none`, `spring.ai.model.embedding.text=none`) |
+| `assistant.llm.timeout.*`, `resilience4j.circuitbreaker.instances.llm.*` | assistant | Timeouts and circuit breaker of the LLM calls |
+| `ASSISTANT_DB_URL`, `ASSISTANT_DB_USER`, `ASSISTANT_DB_PASSWORD` | assistant | PostgreSQL with pgvector (R2DBC) |
+| `REDIS_HOST`, `REDIS_PORT`, `assistant.urgency.discharged-ttl` | assistant | Urgency view (phase 5) |
 
 **Backpressure.** Kafka consumers use `max.poll.records` and a bounded `flatMap` concurrency; the outbox relay works in batches; R2DBC pool sizes and WebClient timeouts are explicit.
 
@@ -677,6 +698,7 @@ Status `written` means the file exists in `docs/adr/` (checked by `scripts/check
 | 0018 | Shared web module and a single error format | written |
 | 0019 | Observability: OpenTelemetry traces, ECS logs, metrics and health | written |
 | 0020 | API hardening: audience, body limit, rate limit and protected metrics | written |
+| 0021 | Idempotent urgency view that tolerates missing, repeated and late events | written |
 
 At least two are required; the more concrete ones (0001, 0002, 0006, 0007) are the priority.
 

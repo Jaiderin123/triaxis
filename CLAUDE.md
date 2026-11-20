@@ -11,7 +11,7 @@ Triaxis is a reactive digital triage system with a clinical assistant. Nurses re
 | Phased checklist (what to do next) | `docs/PLAN.md` |
 | Assumptions and ambiguities | `docs/ASSUMPTIONS.md` |
 | Git and commit conventions | `docs/GIT_WORKFLOW.md` |
-| Decision records | `docs/adr/` (README, template and ADRs 0001, 0003, 0005, 0006, 0009, 0012, 0013, 0014, 0015, 0016, 0017, 0018, 0019 and 0020 exist; the status of the rest is in `ARCHITECTURE.md` section 14) |
+| Decision records | `docs/adr/` (README, template and ADRs 0001, 0003, 0005, 0006, 0009, 0012, 0013, 0014, 0015, 0016, 0017, 0018, 0019, 0020 and 0021 exist; the status of the rest is in `ARCHITECTURE.md` section 14) |
 | Original requirements (RF-xx, RN-xx), Spanish | `docs/private/ASSIGNMENT.md` (local only, git-ignored) |
 
 ## Modules
@@ -25,7 +25,7 @@ Triaxis is a reactive digital triage system with a clinical assistant. Nurses re
 | `triaxis-security` | n/a | Library: shared resource-server (JWT) configuration |
 | `triaxis-web` | n/a | Library: standard error responses, access log, protected metrics, tracing (no business logic) |
 
-All five modules exist on Spring Boot 3.5.16 and `./gradlew build` passes. Done: auth service and shared security (phase 1), the triage core with the audit (phase 2), the events through a transactional outbox with an ordered relay to Kafka (phase 3), the platform foundation (standard errors, OpenTelemetry, JSON logs, protected metrics, hardening) and the SLA escalation with its scheduler (phase 4, in review). Next: the assistant (phase 5). The assistant (RAG and the urgency view) is not started. The status table and the resume notes are in `docs/PLAN.md`.
+All five modules exist on Spring Boot 3.5.16 and `./gradlew build` passes. Done: auth service and shared security (phase 1), the triage core with the audit (phase 2), the events through a transactional outbox with an ordered relay to Kafka (phase 3), the platform foundation (standard errors, OpenTelemetry, JSON logs, protected metrics, hardening) and the SLA escalation with its scheduler (phase 4, in review). Next: the assistant (phase 5), planned in `docs/PLAN.md` (two pull requests: RAG, then the urgency view) and not started. The status table and the resume notes are in `docs/PLAN.md`.
 
 ## Package layout (hexagonal, per service)
 

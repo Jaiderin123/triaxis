@@ -127,6 +127,8 @@ A1 to A4 come from `ARCHITECTURE.md` section 6.2. A5 onward were added while pre
 
 ## A19. Urgency view counts
 
+> **Superseded by A33** (ADR 0021). Kept for history.
+
 - **Ambiguity:** "active" patients are "all that are not in ALTA", but the view is built from events only.
 - **Decision:** `paciente_registrado` increments the level; `paciente_alta` decrements it; `paciente_en_consulta` and `paciente_escalado` do not change counts. The level never changes after registration, so the stored level is used on discharge. Unknown patients in a discharge event are ignored.
 - **Why:** keeps the Lua script small and idempotent.
@@ -215,4 +217,32 @@ A1 to A4 come from `ARCHITECTURE.md` section 6.2. A5 onward were added while pre
 - **Decision:** both are the current status (`REGISTRADO`), and `escalado` is `true`. The audit entry also has the same previous and new status. Escalation never changes the status or the time of the last status change (A9).
 - **Why:** the fields stay non-null and true; a consumer can tell the escalation by `tipo` alone.
 - **Impact if wrong:** a consumer that expects `estadoAnterior` to be null for escalations needs a one-line change in the domain event factory.
+
+## A33. Urgency view counts (replaces A19)
+
+- **Ambiguity:** "active" patients are all that are not in `ALTA`, but the view is built from events only, and the specification does not say how it behaves with repeated, missing or late events. Our delivery is at least once (ADR 0005), and a rebuild replays the topic.
+- **Decision:** any event other than `paciente_alta` stores an unknown patient as active with the level of the event and adds one; `paciente_alta` marks the patient as discharged (subtracting one if it was active), and discharged is final; events of a known patient change nothing else. The discharged marker expires after 30 days, longer than the topic retention. See ADR 0021.
+- **Why:** the first rule (A19) did not count a patient whose registration was never seen, and could count a discharged patient again after a repeated registration. The new rule gives the right count in both cases.
+- **Impact if wrong:** a patient discharged and then registered again with the same id would not be counted; triage never reuses ids, so this cannot happen. Reclassification would need a new event type.
+
+## A34. Question validation and the fixed notice
+
+- **Ambiguity:** the specification asks for an explicit "no protocol available" answer, and for input validation, without the exact text or limits.
+- **Decision:** `pregunta` is required, not blank, and at most 1000 characters (400 naming `pregunta` otherwise). The fixed notice is `No existe un protocolo disponible para esta pregunta.`, with `fuentes: []` and HTTP 200 (A10). The same notice replaces an answer whose citations fail validation (A11).
+- **Why:** a bounded question keeps the prompt and the cost under control; one fixed text is easy to test and never contains clinical content.
+- **Impact if wrong:** the limit and the text are configuration and a constant.
+
+## A35. Response of the urgency view
+
+- **Ambiguity:** the specification asks for the number of active patients per level without a JSON shape.
+- **Decision:** `{ "porNivel": { "CRITICO": n, "URGENTE": n, "URGENTE_2": n, "NO_URGENTE": n, "NO_URGENTE_2": n }, "total": n, "actualizadoEn": "..." }`. All five levels are always present (zeros included); `actualizadoEn` is the time of the newest applied event, null when none.
+- **Why:** a client reads a level directly by its name; `actualizadoEn` shows how fresh the view is.
+- **Impact if wrong:** a different shape is a DTO change.
+
+## A36. Similarity threshold without a Gemini key
+
+- **Ambiguity:** the threshold must be calibrated with the embedding model, and no Gemini key is available during phase 5.
+- **Decision:** phase 5 is built and tested with the `mock` provider, and its threshold is calibrated with the three sample questions. The Gemini adapter is built, configured and covered by tests with fakes, but its threshold is a provisional value until it is calibrated with a real key, together with the choice of the deployed LLM profile (A16, phase 8).
+- **Why:** no key and no cost are needed to finish the phase, and tests never call a real provider anyway.
+- **Impact if wrong:** with a real key and the provisional threshold, a question could be answered or refused wrongly until the calibration is done; the threshold is a property.
 
