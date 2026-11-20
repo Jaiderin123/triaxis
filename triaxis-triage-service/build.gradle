@@ -31,7 +31,8 @@ dependencies {
 	testImplementation 'org.testcontainers:r2dbc'
 	testImplementation libs.archunit.junit5
 	testImplementation libs.blockhound
-	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+	// Compile scope: BlockHoundSessionListener installs BlockHound when the test JVM starts.
+	testImplementation 'org.junit.platform:junit-platform-launcher'
 }
 
 tasks.withType(JavaCompile).configureEach {
