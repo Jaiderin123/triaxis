@@ -321,6 +321,13 @@ CREATE TABLE outbox_events (
   published_at TIMESTAMPTZ
 );
 CREATE INDEX idx_outbox_pending ON outbox_events (id) WHERE published_at IS NULL;
+
+CREATE TABLE alert_deliveries (            -- escalation events already alerted (section 6.8, A45)
+  event_id   UUID PRIMARY KEY,             -- first record wins (INSERT ... ON CONFLICT DO NOTHING)
+  patient_id UUID NOT NULL,                -- no reference to patients: an unknown patient is recorded as FAILED
+  outcome    VARCHAR(16) NOT NULL,         -- SENT, FAILED or SKIPPED (a duplicate is only counted)
+  handled_at TIMESTAMPTZ NOT NULL
+);
 ```
 
 The schema is created by initialization scripts executed through R2DBC (no Flyway, to avoid a second JDBC driver). Every R2DBC session runs in UTC, with `statement_timeout` 10 s and `lock_timeout` 5 s, set by a `ConnectionFactoryOptionsBuilderCustomizer` (`R2dbcSessionConfiguration`, ADR 0022); the tests run in a non-UTC JVM and check it. `patient_audit.patient_id` references `patients (id)`.
@@ -443,13 +450,16 @@ Assumptions: waiting time is registration to the first (and only) transition int
 
 ### 6.8 Alerts to the medical team (RF-06, open requirement)
 
-**Decision (ADR 0011):** a Kafka-driven `AlertNotifier` port inside `triage-service`.
+**Decision (ADR 0011, delivery amended by ADR 0023):** a Kafka-driven `AlertNotifier` port inside `triage-service`.
 
-- A listener in its own consumer group (`triage-escalation-alerts`) reads `triaje.eventos` and reacts to `paciente_escalado`; other event types are acknowledged at once and invalid records are skipped and counted. It is asynchronous and acknowledges a record after handling it.
+- A listener in its own consumer group (`triage-escalation-alerts`, `auto.offset.reset=earliest`, A46) reads `triaje.eventos` and reacts to `paciente_escalado`; other event types are acknowledged at once and invalid records are skipped and counted. It is asynchronous and acknowledges a record after handling it.
 - Adapters: `LoggingAlertNotifier` (default, `triage.alerts.channel: log`) and `WebhookAlertNotifier` (`webhook`, URL from `ALERT_WEBHOOK_URL`), which posts JSON with a `text` field (shown by Slack and Teams incoming webhooks) and the structured fields, with connect and response timeouts.
 - Content (A44): `pacienteId`, `nivel`, `slaMinutos`, `minutosEsperando` (from the registration to the escalation, read from the patient), `escaladoEn` and `ruta` (`/triage/pacientes/{id}`); no name, vital signs or complaint.
-- Delivery (A45): up to 3 attempts (1 s, 2 s, 4 s), then counted as failed and the next event goes on; a table `alert_deliveries (event_id PRIMARY KEY, patient_id, outcome, handled_at)` records every handled event, and an event already recorded is not sent again.
-- Metric `triage.alerts` by outcome (`sent`, `failed`, `duplicate`). The payload and the patient data are never logged.
+- Delivery (A45): up to 3 attempts in total (waits of 1 s and then 2 s between them), then counted as failed and the next event goes on; a table `alert_deliveries (event_id PRIMARY KEY, patient_id, outcome, handled_at)` records every handled event, and an event already recorded is not sent again.
+- Only a patient that still waits is alerted (ADR 0023): when the event is handled after the patient entered consultation or was discharged (a late event, or the replay of the retained topic by a group that starts for the first time), nothing is sent and the event is recorded as `SKIPPED`.
+- Metric `triage.alerts` by outcome (`sent`, `failed`, `skipped`, `duplicate`) and `triage.alerts.invalid` for skipped records. The payload, the webhook URL (a secret) and the patient data are never logged: a channel error only names its cause (the HTTP status, a timeout or the exception type), and the log channel writes only the minimal content of A44 as key-value pairs of the JSON line (`alert.*`).
+- Handling: at most 16 events in flight; each one is bounded by a timeout derived from the settings (every attempt at its longest, the waits between them, and 30 s for the two statements). A failing channel is an outcome, not an error; an error (the database does not answer) is retried with back-off until it works, and the record is not acknowledged meanwhile.
+- The use case is `NotifyEscalationService` (application); the adapters are in `infrastructure.adapter.out.alert`, the store is `R2dbcAlertDeliveryStore` and the listener is `EscalationAlertListener` (`infrastructure.adapter.in.messaging`). Triage runs the listener as a single consumer group; with several replicas the partitions are shared and `alert_deliveries` keeps one alert per event (a rebalance in the middle of a send can still repeat one, A45).
 
 Example of the webhook body:
 
@@ -671,7 +681,8 @@ Event types: `paciente_registrado`, `paciente_en_consulta`, `paciente_alta`, `pa
 | `triage.escalation.enabled`, `triage.escalation.interval`, `triage.escalation.batch-size`, `triage.escalation.batch-timeout` | triage | Escalation loop (defaults `true`, `PT30S`, `100`, `PT60S`), validated at startup |
 | `triage.administrative-complaints` | triage | Level 5 complaint list |
 | `triage.report.max-range` | triage | Longest range of the operation report (default `P31D`, phase 6) |
-| `triage.alerts.channel` (`log` or `webhook`), `ALERT_WEBHOOK_URL`, `triage.alerts.webhook.connect-timeout`, `response-timeout`, `triage.alerts.attempts`, `triage.alerts.backoff` | triage | Alerts of escalated patients (defaults `log`, 2 s, 5 s, 3 attempts, 1 s doubling; phase 7) |
+| `triage.alerts.channel` (`log` or `webhook`), `ALERT_WEBHOOK_URL` (`triage.alerts.webhook.url`), `triage.alerts.webhook.connect-timeout`, `response-timeout`, `triage.alerts.attempts`, `triage.alerts.backoff` | triage | Alerts of escalated patients (defaults `log`, 2 s, 5 s, 3 attempts in total, 1 s doubling). Validated by `AlertProperties` at startup: attempts at least 1, positive durations, and with `webhook` an absolute http or https URL; the URL is never printed |
+| `spring.kafka.consumer.*` (triage) | triage | Consumer of the alert listener: no auto commit, string deserializers, 50 records per poll, `request.timeout.ms` 10 s and `default.api.timeout.ms` 15 s; the group and `auto.offset.reset` are set on the listener |
 | `triage.outbox.relay.*` (including `send-timeout` 15 s, `cycle-budget` 30 s and `cycle-timeout` 60 s, validated so that the timeout exceeds budget plus send), `triage.outbox.topic.*` | triage | Relay loop and topic creation |
 | `TRIAGE_DB_URL`, `TRIAGE_DB_USER`, `TRIAGE_DB_PASSWORD` | triage | PostgreSQL (R2DBC) |
 | `KAFKA_BOOTSTRAP_SERVERS` | triage, assistant | Kafka |
@@ -707,7 +718,7 @@ Event types: `paciente_registrado`, `paciente_en_consulta`, `paciente_alta`, `pa
 | Web | Status codes, validation messages, authorization per role, an explicit rule for every route | `@SpringBootTest` with `WebTestClient`, `spring-security-test`, `RouteInventory` |
 | RAG | Citations present, no-match case without any LLM call, rejected invalid citation | Fake LLM and fake embeddings with controlled vectors |
 | Resilience | Breaker opens after failures and the endpoint answers 503 | Fake failing LLM |
-| Non-blocking | No blocking call on event-loop threads | BlockHound: a flow test in triage; in the assistant it is installed when the test JVM starts, so every test runs under it |
+| Non-blocking | No blocking call on event-loop threads | BlockHound, installed when the test JVM of the assistant and of triage starts, so every test of both runs under it; flow tests cover the API, the escalation and the alerts |
 
 The LLM and embeddings are always faked in tests; no test calls a real provider.
 
@@ -766,6 +777,7 @@ Status `written` means the file exists in `docs/adr/` (checked by `scripts/check
 | 0020 | API hardening: audience, body limit, rate limit and protected metrics | written |
 | 0021 | Idempotent urgency view that tolerates missing, repeated and late events | written |
 | 0022 | Deny by default, bounded waits and UTC sessions (from the review of 2026-11-19) | written |
+| 0023 | Alerts only for patients that still wait (partly supersedes 0011) | written |
 
 At least two are required; the more concrete ones (0001, 0002, 0006, 0007) are the priority.
 
