@@ -201,3 +201,18 @@ A1 to A4 come from `ARCHITECTURE.md` section 6.2. A5 onward were added while pre
 - **Decision:** readiness includes the database and excludes Kafka, because the outbox keeps events when Kafka is down and the service can still register patients.
 - **Why:** a broker outage must not take every pod out of service.
 - **Impact if wrong:** adding Kafka to the readiness group is a one-line property change.
+
+## A31. Trace of an escalation
+
+- **Ambiguity:** the correlation id of an event is the trace id of the request that caused it (A26), but an escalation is started by the scheduler, not by a request.
+- **Decision:** escalation events have no request trace: the outbox row has no `correlation_id` or `traceparent`, and the Kafka message has only the `eventType` header. The audit entry records the actor `system`, and the scheduler logs how many patients it escalated.
+- **Why:** inventing a trace per cycle adds code without a caller to correlate with; the patient id (the message key) already links the escalation to the earlier events.
+- **Impact if wrong:** a consumer that requires `correlationId` must accept it as optional. Starting an observation per cycle would add a trace without changing the contract.
+
+## A32. Statuses in the escalation event and audit entry
+
+- **Ambiguity:** the event contract has `estadoAnterior` and `estadoNuevo`, but an escalation does not change the status.
+- **Decision:** both are the current status (`REGISTRADO`), and `escalado` is `true`. The audit entry also has the same previous and new status. Escalation never changes the status or the time of the last status change (A9).
+- **Why:** the fields stay non-null and true; a consumer can tell the escalation by `tipo` alone.
+- **Impact if wrong:** a consumer that expects `estadoAnterior` to be null for escalations needs a one-line change in the domain event factory.
+

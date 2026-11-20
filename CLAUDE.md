@@ -11,7 +11,7 @@ Triaxis is a reactive digital triage system with a clinical assistant. Nurses re
 | Phased checklist (what to do next) | `docs/PLAN.md` |
 | Assumptions and ambiguities | `docs/ASSUMPTIONS.md` |
 | Git and commit conventions | `docs/GIT_WORKFLOW.md` |
-| Decision records | `docs/adr/` (README, template and ADRs 0001, 0003, 0005, 0009, 0012, 0013, 0014, 0015, 0016, 0017, 0018, 0019 and 0020 exist; the status of the rest is in `ARCHITECTURE.md` section 14) |
+| Decision records | `docs/adr/` (README, template and ADRs 0001, 0003, 0005, 0006, 0009, 0012, 0013, 0014, 0015, 0016, 0017, 0018, 0019 and 0020 exist; the status of the rest is in `ARCHITECTURE.md` section 14) |
 | Original requirements (RF-xx, RN-xx), Spanish | `docs/private/ASSIGNMENT.md` (local only, git-ignored) |
 
 ## Modules
@@ -25,7 +25,7 @@ Triaxis is a reactive digital triage system with a clinical assistant. Nurses re
 | `triaxis-security` | n/a | Library: shared resource-server (JWT) configuration |
 | `triaxis-web` | n/a | Library: standard error responses, access log, protected metrics, tracing (no business logic) |
 
-All five modules exist on Spring Boot 3.5.16 and `./gradlew build` passes. Done: auth service and shared security (phase 1), the triage core with the audit (phase 2), the events through a transactional outbox with an ordered relay to Kafka (phase 3) and the platform foundation (standard errors, OpenTelemetry, JSON logs, protected metrics, hardening). Next: escalation (phase 4). The assistant (RAG and the urgency view) is not started. The status table and the resume notes are in `docs/PLAN.md`.
+All five modules exist on Spring Boot 3.5.16 and `./gradlew build` passes. Done: auth service and shared security (phase 1), the triage core with the audit (phase 2), the events through a transactional outbox with an ordered relay to Kafka (phase 3), the platform foundation (standard errors, OpenTelemetry, JSON logs, protected metrics, hardening) and the SLA escalation with its scheduler (phase 4, in review). Next: the assistant (phase 5). The assistant (RAG and the urgency view) is not started. The status table and the resume notes are in `docs/PLAN.md`.
 
 ## Package layout (hexagonal, per service)
 
@@ -58,7 +58,7 @@ Reactive
 
 Correctness
 - State changes are conditional `UPDATE ... WHERE status = :expected`. Zero rows means re-read, then 404 or 409.
-- Escalation is one atomic `UPDATE ... RETURNING` with `FOR UPDATE SKIP LOCKED`; a patient is escalated at most once and never from `EN_CONSULTA` or `ALTA`.
+- Escalation is one atomic `UPDATE ... RETURNING` with `FOR UPDATE SKIP LOCKED` (ADR 0006); a patient is escalated at most once and never from `EN_CONSULTA` or `ALTA`. The escalation loop is off in tests (`triage.escalation.enabled=false`); they call the use case with a fixed clock and back-dated patients.
 - Patient row, audit entry and outbox row are written in one transaction (done, ADR 0005). The relay delivers the outbox to Kafka in order; the relay loop is off in tests and they call `relayOnce()`.
 - The audit table is append-only and records the actor (JWT `sub`, or `system`). There is no delete endpoint.
 - Validation of business data lives in the domain; the web layer only checks JSON shape. Boundary mappers use MapStruct and only copy data.
