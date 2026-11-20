@@ -16,7 +16,7 @@ Working checklist. Follow the phases in order; tick boxes as work lands. Source 
 | Review fixes of 2026-11-19 (between phases 5 and 6) | done | `review-2026-11-19` |
 | 6 Operation report | done | `phase-6-report` |
 | 7 Alerts | done | `phase-7-alerts` |
-| 8 Deployment | planned (starts when the Azure account is ready) | |
+| 8 Deployment | in progress: part A verified, Azure pending | |
 | 9 Docs | pending | |
 
 ### Definition of done for phases 6 to 9 (engineering rules of the review of 2026-11-19)
@@ -35,13 +35,16 @@ Every pull request of phases 6 to 9 checks, in addition to the build and `script
 
 ### Where to resume (phase 8)
 
-State on 2026-11-20: phases 0 to 7 and the review fixes are released to `main` (tags up to `phase-7-alerts`); `main` and `develop` are protected (pull request required, no direct or force pushes). Phase 8 is **planned and approved** (ADR 0010, ADR 0024, A16, A47, A48), and it starts only when the Azure account is set up.
+State on 2026-11-20: phases 0 to 7 are released to `main` (tags up to `phase-7-alerts`). Phase 8 is in progress on `feat/phase-8-deployment` (delivery on 2026-11-21). Part A is done and verified: the shared Dockerfile, `docker compose up --build` with the sample flow, and the manifests on kind with the sample flow through the Ingress. Part B is written and checked without Azure only (Terraform `validate`; the `aks` overlay accepted by a server-side dry run on kind; the redirect to HTTPS tested on a Traefik pod in kind, which showed that redirecting to the `websecure` entry point leaks its container port 8443, so it redirects to `:443`); nothing was created on Azure yet.
 
-- Before starting, check the prerequisites listed in the Phase 8 section (subscription, quota, budget, Azure CLI, GHCR token, Gemini key, passwords of the deployed users).
-- Then create `feat/phase-8-deployment` from `develop` and begin with part A (it needs no Azure): the Dockerfiles, the roles and the schema step, the full compose file, the review tasks and the manifests validated on kind. Part B deploys to AKS, with an early smoke deploy.
-- At the start of the phase, check again the current state and the versions of the ingress controller and cert-manager, and the exact image tags (`eclipse-temurin`, `pgvector/pgvector`, `redis`, `apache/kafka`).
-- After phase 8: phase 9 (docs). The accepted debt is in "Improvements" at the end of this file.
-- Conventions: the definition of done of phases 6 to 9 above; the route rule test; UTC sessions; no secrets in the repository; check that a fresh clone compiles. BlockHound is installed when the test JVM of triage and of the assistant starts (`BlockHoundSessionListener`), never inside a test.
+Next, on the evening of 2026-11-20 (the owner of the project runs or approves every step on Azure):
+1. Register the resource providers (`Microsoft.ContainerService`, `Compute`, `Network`, `Storage`), check the quota of `Standard_B2ms` in `eastus2` (free trial subscription) and that the DNS label `triaxis-demo` is free; otherwise change `dns_label` and the host of the `aks` overlay together.
+2. Create `deploy/azure/terraform/terraform.tfvars` and the files `~/.config/triaxis/ghcr.env` and `deploy.env`.
+3. `deploy/azure/deploy.sh`, make the three GHCR packages public, run the sample flow over HTTPS (with a question to Gemini), record the URL in the README.
+4. `deploy/azure/stop.sh` until the delivery; start it when the repository is handed in and keep it running during the review window; `destroy.sh` at the end.
+5. Then the pull requests (phase 8 to `develop` and `main`, tag `phase-8-deployment`) and phase 9 (docs).
+
+- Conventions: the definition of done of phases 6 to 9 above; no secrets in the repository (the Terraform state and `terraform.tfvars` are git-ignored); check that a fresh clone compiles.
 - Documentation sync: follow the checklist in `CLAUDE.md` and run `scripts/check-docs.sh` before each pull request.
 
 ## Cut list and priorities
@@ -325,30 +328,27 @@ Prerequisites outside the repository (the user prepares them before the phase st
 - A GitHub token that can publish packages to GHCR, and the packages made public after the first push.
 - The Gemini key (already in `~/.config/triaxis/gemini.env`) and the passwords of the deployed users of auth.
 
+Revision on 2026-11-20 (approved; delivery on 2026-11-21): Terraform creates the Azure resources instead of Azure CLI scripts, Traefik gets the Let's Encrypt certificate itself instead of cert-manager, one shared Dockerfile builds the three images, and the node is `Standard_B2ms` in `eastus2`. Only the essentials of the specification are built before the delivery; the database roles with the schema step (ADR 0024) and the rate limit behind the Ingress moved to "Improvements" (see the revision of ADR 0010).
+
 Tasks, part A: local (needs no Azure)
-- [ ] One multi-stage Dockerfile per service and a `.dockerignore`; graceful shutdown and non-root user
-- [ ] Database roles and the schema step (ADR 0024): roles created on the first start of PostgreSQL, the schema scripts applied by the owner role, the services with least-privilege roles; triage only `INSERT` and `SELECT` on `patient_audit`
-- [ ] `docker-compose.yml` runs the infrastructure, the schema step and the three services with `docker compose up --build`; `mock` LLM; the demo users of the local profile only here; infrastructure ports published on `127.0.0.1`; exact image tags (`pgvector/pgvector`, `redis`, also in the test containers); a password for Redis
-- [ ] Rate limit of the token endpoint behind the Ingress (from the review, finding A2): count only failed attempts, check the address before the username, set `server.forward-headers-strategy` explicitly and trust only the forwarded address of the Ingress (A28, ADR 0020)
-- [ ] `auth.users` from a Secret (ARCHITECTURE section 10); auth logs a warning when it starts without users
-- [ ] `deploy/k8s/` base: namespace, Deployments with probes, resources and security context, Services, ConfigMap, the Secret template, the schema Job, the topic Job (`triaje.eventos`, 3 partitions, retention of 7 days, ADR 0021), StatefulSets of PostgreSQL, Kafka and Redis (`maxmemory-policy noeviction`, password), the `Ingress` without `/actuator`, `replicas: 1` for every service
-- [ ] Overlay `kind` and a validation on kind: the sample flow (token, registration, escalation with a short SLA, alert in the log, report, a question to the `mock` assistant) through the Ingress
+- [x] One multi-stage Dockerfile for the three services (`docker/service.Dockerfile`) and a `.dockerignore`; non-root user, exact base image tags
+- [x] `docker-compose.yml` runs the infrastructure and the three services with `docker compose up --build`; `mock` LLM; the demo users only here; every port published on `127.0.0.1`; exact image tags (also in the test containers); a password and `noeviction` for Redis; the topic with a retention of 7 days (also when triage creates it)
+- [x] `deploy/k8s/` base: namespace, ConfigMap, Deployments with probes, resources and a restricted security context, Services, StatefulSets of PostgreSQL, Kafka and Redis, the topic Job, Traefik, the `Ingress` without `/actuator`, `replicas: 1`; the Secret created by `deploy/scripts/create-secrets.sh` (auth users from it)
+- [x] Overlay `kind` and a validation on kind (`deploy/scripts/kind-up.sh`): the sample flow through the Ingress, and `/actuator` not routed
 
 Tasks, part B: Azure
-- [ ] The scripts of `deploy/azure/`: resource group, AKS (free tier, one node), the DNS label, the ingress controller and cert-manager with pinned versions, the Secrets from the environment, the images pushed to GHCR, the `aks` overlay applied after the schema Job completed; plus stop, start and delete
-- [ ] **An early smoke deploy** (health inside the cluster and one token through the public HTTPS address) before the rest is polished
-- [ ] The full sample flow over HTTPS on the public address, including a question to Gemini with its citations and the 503 of the degraded mode when the key is wrong; record the URL in the README
-- [ ] The budget alert checked, and the stop and start of the cluster tried once
+- [ ] Terraform in `deploy/azure/terraform` (resource group, AKS free tier with one node, static public IP with the DNS label, optional budget), `terraform validate` passing, and the wrapper scripts (`deploy.sh`, `push-images.sh`, `stop.sh`, `start.sh`, `destroy.sh`)
+- [ ] Overlay `aks`: images from GHCR, Gemini, the static IP, Let's Encrypt and the redirect to HTTPS
+- [ ] The first apply on Azure, the images pushed and made public, and the sample flow over HTTPS on the public address, including a question to Gemini with its citations; record the URL in the README
+- [ ] The budget alert checked, and the cluster stopped until the delivery, then running during the review window
 
 Checks that must exist:
 - A fresh clone runs with `docker compose up --build` and the sample flow works with curl.
-- The services connect with their own roles: triage cannot `UPDATE` or `DELETE` a row of `patient_audit` (a test or a scripted check with the runtime role).
 - `/actuator` is not reachable through the Ingress, and the metrics still answer inside the cluster with the Secret credentials.
-- The rate limit counts only failed attempts and uses the forwarded address of the Ingress (tests in auth).
-- auth starts without users with a warning, and with the users of the Secret it issues tokens.
+- auth issues tokens with the users of the Secret.
 - No secret in the repository, the images or the manifests (only the template).
 
-Definition of done: `./gradlew build` and `scripts/check-docs.sh` pass, a fresh clone compiles, the checklist of phases 6 to 9 is met, `docker compose up --build` brings the system up and the sample flow works with curl, `kubectl apply -k deploy/k8s/overlays/kind` works on kind, and the public HTTPS address on Azure answers the sample flow (the readiness is checked inside the cluster, because `/actuator` is not public).
+Definition of done: `./gradlew build` and `scripts/check-docs.sh` pass, a fresh clone compiles, the checklist of phases 6 to 9 is met, `docker compose up --build` brings the system up and the sample flow works with curl, `deploy/scripts/kind-up.sh` works on kind, and the public HTTPS address on Azure answers the sample flow (the readiness is checked inside the cluster, because `/actuator` is not public).
 
 First commit: `build: add Dockerfiles, compose and Kubernetes manifests`
 
@@ -587,6 +587,12 @@ One entry per finished piece of work: what was done, decisions taken, how it was
 ## Improvements (out of scope for now)
 
 Ideas that were consciously left out of the first delivery:
+
+Moved out of phase 8 on 2026-11-20 to keep the delivery on time (revision of ADR 0010):
+
+- Database roles (ADR 0024, accepted): an owner role applies the schema in a separate step (a Job, a one-shot compose service) and each service runs with a least-privilege role and `spring.sql.init.mode: never`; the runtime role of triage only has `INSERT` and `SELECT` on `patient_audit` (ADR 0014). Today the services use the superuser of the PostgreSQL container.
+- Rate limit of the token endpoint behind the Ingress (review finding A2): count only failed attempts, check the address before the username, set `server.forward-headers-strategy` explicitly and trust only the forwarded address of the Ingress (A28, ADR 0020). Behind Traefik every client shares the address of the proxy, so the limit per address is global.
+- auth logs a warning when it starts without users.
 
 From the review of 2026-11-19 (report in `docs/private/reviews/`, not versioned), accepted as debt:
 
