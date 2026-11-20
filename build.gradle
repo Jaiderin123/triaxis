@@ -31,6 +31,8 @@ subprojects {
         useJUnitPlatform()
         // Required by BlockHound on JDK 13 and later.
         jvmArgs '-XX:+AllowRedefinitionToAddDeleteMethods'
+        // Tests run in a JVM that is not in UTC, so code that silently depends on the JVM time zone fails.
+        systemProperty 'user.timezone', 'America/Bogota'
         finalizedBy tasks.named('jacocoTestReport')
     }
 
