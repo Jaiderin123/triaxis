@@ -31,7 +31,7 @@ These are cross-cutting choices with alternatives, so they are recorded together
   - a hard `cycle-timeout` (60 s) is only a safety net for a stuck cycle, which is rolled back. It is validated at startup to be longer than the budget plus one send.
 - **Bounded similarity search.** The search of the assistant has a timeout (`assistant.rag.search-timeout`), and a database failure is a 503.
 - **UTC sessions.** The same customizer sets the session time zone to UTC. A customizer is used instead of `spring.r2dbc.properties` because Spring Boot ignores those properties when the connection comes from connection details, which is the case in the Testcontainers tests. Every test JVM runs in `America/Bogota`, so code that depends on the JVM zone fails in the tests.
-- **A dedicated marker for the urgency view.** `urgency:initialized` is written only by the reset before a replay. When Redis does not answer at partition assignment, the check is retried and the listener restarted later. The assistant runs as a single replica (ASSUMPTIONS A39).
+- **A dedicated marker for the urgency view.** `urgency:initialized` is written only by the reset before a replay. When Redis does not answer at partition assignment, the consumer waits in the assignment with back-off and consumes nothing until it answers; if the wait exceeds `max.poll.interval.ms`, Kafka rebalances and the check starts again, so no retry is left in flight. The first start after this change rebuilds an existing view once, because the marker is new. The assistant runs as a single replica (ASSUMPTIONS A39).
 
 ## Alternatives considered
 

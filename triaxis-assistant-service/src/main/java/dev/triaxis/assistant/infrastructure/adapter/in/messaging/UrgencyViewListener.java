@@ -3,7 +3,6 @@ package dev.triaxis.assistant.infrastructure.adapter.in.messaging;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.Semaphore;
-import java.util.concurrent.TimeUnit;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.triaxis.assistant.application.port.in.ApplyTriageEventUseCase;
@@ -24,7 +23,6 @@ import org.springframework.kafka.listener.AbstractConsumerSeekAware;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
 import reactor.util.retry.Retry;
 
 /**
@@ -55,23 +53,22 @@ class UrgencyViewListener extends AbstractConsumerSeekAware {
 	private final MeterRegistry meters;
 	private final Semaphore inFlight;
 	private final ObjectProvider<KafkaListenerEndpointRegistry> containers;
-	private final int startupAttempts;
 	private final Duration startupBackoff;
-	private final Duration restartDelay;
+	private final Duration startupMaxBackoff;
 
 	UrgencyViewListener(ApplyTriageEventUseCase urgency, UrgencyViewStore store, TriageEventMapper mapper,
 			ObjectMapper json, MeterRegistry meters, ObjectProvider<KafkaListenerEndpointRegistry> containers,
 			@Value("${assistant.urgency.max-in-flight:64}") int maxInFlight,
-			@Value("${assistant.urgency.startup-check.attempts:5}") int startupAttempts,
 			@Value("${assistant.urgency.startup-check.backoff:PT2S}") Duration startupBackoff,
-			@Value("${assistant.urgency.startup-check.restart-delay:PT30S}") Duration restartDelay) {
-		if (startupAttempts < 1) {
-			throw new IllegalArgumentException("assistant.urgency.startup-check.attempts must be at least 1");
+			@Value("${assistant.urgency.startup-check.max-backoff:PT30S}") Duration startupMaxBackoff) {
+		if (maxInFlight < 1 || startupBackoff.isZero() || startupBackoff.isNegative()
+				|| startupMaxBackoff.compareTo(startupBackoff) < 0) {
+			throw new IllegalArgumentException("assistant.urgency.max-in-flight must be at least 1, and "
+					+ "startup-check.backoff positive and not longer than startup-check.max-backoff");
 		}
 		this.containers = containers;
-		this.startupAttempts = startupAttempts;
 		this.startupBackoff = startupBackoff;
-		this.restartDelay = restartDelay;
+		this.startupMaxBackoff = startupMaxBackoff;
 		this.urgency = urgency;
 		this.store = store;
 		this.mapper = mapper;
@@ -124,44 +121,49 @@ class UrgencyViewListener extends AbstractConsumerSeekAware {
 	}
 
 	/**
-	 * Runs on the consumer thread when partitions are assigned (blocking is allowed there). When Redis does not
-	 * answer, the check is retried a few times; if it still fails, the listener container is restarted later, so
-	 * the check (and the rebuild, if needed) runs again when the partitions are assigned again. The attempts must
-	 * stay well below {@code max.poll.interval.ms} (5 minutes by default).
+	 * Runs on the consumer thread when partitions are assigned (blocking is allowed there). Until Redis answers
+	 * the check, the consumer waits here with back-off and consumes nothing, so no record is applied to a view
+	 * that may need a rebuild and no retry is left in flight. If the wait exceeds {@code max.poll.interval.ms},
+	 * Kafka rebalances the group and the check starts again at the next assignment. The wait ends when the
+	 * listener container stops.
 	 */
 	@Override
 	public void onPartitionsAssigned(Map<TopicPartition, Long> assignments, ConsumerSeekCallback callback) {
 		super.onPartitionsAssigned(assignments, callback);
-		for (int attempt = 1; attempt <= startupAttempts; attempt++) {
+		Duration wait = startupBackoff;
+		for (int attempt = 1; ; attempt++) {
 			try {
 				if (!Boolean.TRUE.equals(store.isInitialized().block(STARTUP_CHECK))) {
 					log.info("The urgency view is not built: rebuilding it from the beginning of {}", TriageEvent.TOPIC);
 					store.reset().block(STARTUP_CHECK);
 					callback.seekToBeginning(assignments.keySet());
 				}
+				if (attempt > 1) {
+					log.info("Redis answers again: the urgency view was checked after {} attempts", attempt);
+				}
 				return;
 			}
 			catch (RuntimeException unavailable) {
-				log.warn("Could not check the urgency view (attempt {} of {}): {}", attempt, startupAttempts,
-						unavailable.toString());
-				if (attempt < startupAttempts) {
-					pause(startupBackoff);
+				meters.counter("assistant.urgency.startup.failures").increment();
+				if (!listenerRunning()) {
+					log.warn("The urgency view was not checked: the listener is stopping");
+					return;
 				}
+				log.warn("Redis does not answer (attempt {}); the listener waits {} before consuming: {}", attempt, wait,
+						unavailable.toString());
+				pause(wait);
+				wait = wait.multipliedBy(2).compareTo(startupMaxBackoff) > 0 ? startupMaxBackoff : wait.multipliedBy(2);
 			}
 		}
-		meters.counter("assistant.urgency.startup.failures").increment();
-		log.error("Redis does not answer: the urgency view is checked again after a restart of the listener in {}",
-				restartDelay);
-		Schedulers.boundedElastic().schedule(this::restartContainer, restartDelay.toMillis(), TimeUnit.MILLISECONDS);
 	}
 
-	private void restartContainer() {
+	private boolean listenerRunning() {
+		if (Thread.currentThread().isInterrupted()) {
+			return false;
+		}
 		KafkaListenerEndpointRegistry registry = containers.getIfAvailable();
 		MessageListenerContainer container = registry == null ? null : registry.getListenerContainer(CONTAINER);
-		if (container != null) {
-			container.stop();
-			container.start();
-		}
+		return container == null || container.isRunning();
 	}
 
 	private static void pause(Duration duration) {

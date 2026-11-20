@@ -131,10 +131,9 @@ assistant:
     max-in-flight: 64
     reset-timeout: PT30S
     startup-check:
-      # When Redis does not answer at partition assignment: retries, then a restart of the listener later.
-      attempts: 5
+      # When Redis does not answer at partition assignment the consumer waits there, consuming nothing.
       backoff: PT2S
-      restart-delay: PT30S
+      max-backoff: PT30S
   corpus:
     location: classpath:/protocols/
     retry:
