@@ -22,7 +22,7 @@ Working checklist. Follow the phases in order; tick boxes as work lands. Source 
 
 Phase 4 is built on `feat/phase-4-escalation` and goes to `develop` through its pull request, then to `main` with a merge commit and the tag `phase-4-escalation`. After that, branch `feat/phase-5-assistant` from `develop`. Starting points for the assistant:
 
-- Plan the phase first and record the approved decisions in the Phase 5 section below before writing code (CLAUDE.md, documentation sync item 7). Open points: the Spring AI Google GenAI starters (left as a TODO in phase 0 because their auto-configuration needs an API key), the `mock` profile as default, the threshold calibration and the Redis test container.
+- The phase is planned and its decisions are recorded in the Phase 5 section below (two pull requests: RAG first, then the urgency view). Start with `feat/assistant-rag` from `develop`.
 - The event contract is ready in `triaxis-common` (`TriageEvent`, four event types, all carrying the level). Escalation events have no `correlationId` or `traceparent` header (ASSUMPTIONS A31), so the consumer must treat them as optional.
 - The urgency view is built only from Kafka (group `assistant-urgency-view`, manual ack, Lua script in Redis); never call the triage API.
 - ADRs due in the phase: 0002 (vectors over R2DBC), 0004 (degraded mode), 0007 (anti-hallucination), 0008 (Gemini).
@@ -176,24 +176,43 @@ Suggested commits inside the branch: domain and application; persistence and sch
 
 **Goal:** RF-04 A and B, RN-05, resilience.
 
-Tasks
-- [ ] Protocol files for PROTO-001 to PROTO-003 in `src/main/resources/protocols/`; idempotent ingestion (content hash and embedding model)
-- [ ] `protocol_chunks` with untyped `vector` column; custom R2DBC retrieval with `<=>`
-- [ ] `LlmPort` with Gemini adapter and `mock` adapter (deterministic embeddings and answers); `mock` is the default profile
-- [ ] `AskClinicalQuestionUseCase`: embed, retrieve, threshold gate (no LLM call below it), prompt with numbered excerpts, structured output with excerpt ids or `NO_PROTOCOL`, citation validation, sources from corpus metadata
-- [ ] `ResilientClinicalAnswerGenerator` decorator: circuit breaker, time limiter, 503 fallback
-- [ ] Kafka listener (group `assistant-urgency-view`, manual ack) with Lua script applying events idempotently to Redis
-- [ ] `GET /asistente/estado-urgencias` returns all five levels and a total
-- [ ] Metrics `assistant.llm.latency`, `assistant.answers` by outcome
-- [ ] Calibrate `assistant.rag.max-distance` with the three sample questions
+Decisions (approved, not started yet):
+- Two branches and two pull requests into `develop`: `feat/assistant-rag` (corpus, pgvector, LLM, anti-hallucination, circuit breaker) and then `feat/assistant-urgency-view` (Kafka and Redis). The release to `main` and the tag `phase-5-assistant` come after both.
+- No Gemini key yet: everything is built and tested with the `mock` provider (the default); the Gemini adapter is built and tested with fakes, and its threshold is calibrated later (ASSUMPTIONS A36, A16).
+- Gemini through the Spring AI 1.1.8 starters `spring-ai-starter-model-google-genai` and `spring-ai-starter-model-google-genai-embedding` (checked on Maven Central); with `mock` their auto-configuration is switched off with `spring.ai.model.chat=none` and `spring.ai.model.embedding.text=none`. Models are properties.
+- Corpus: one Markdown file per protocol, one chunk per section, id `PROTO-001#medidas-iniciales`; `seccion` is the section title of the corpus. Idempotent ingestion at startup (content hash and embedding model).
+- Retrieval: top-k 4 by cosine distance over R2DBC (`<=>`); only chunks within `max-distance` reach the model; none within it gives the fixed notice and no LLM call.
+- The model returns JSON with the answer and the excerpt numbers used, or `NO_PROTOCOL`; an invalid or unretrieved citation gives the fixed notice; sources come from corpus metadata only. Mock answer is extractive.
+- Fixed notice `No existe un protocolo disponible para esta pregunta.` (200, `fuentes: []`); `pregunta` required, at most 1000 characters (A34).
+- One circuit breaker `llm` over the embedding and the chat call, explicit timeouts, no retry of the chat call, 503 through the shared `ProblemWriter`.
+- Urgency view with the robust rule of ADR 0021 (A33 replaces A19): any non-discharge event registers an unknown patient, discharge is final with a 30-day marker; rebuild from the earliest offset when `urgency:meta` is missing.
+- Response of the view: `porNivel` with the five levels, `total`, `actualizadoEn` (A35).
+- Roles: `POST /asistente/consulta` is `DOCTOR`; `GET /asistente/estado-urgencias` is `NURSE` and `DOCTOR`.
+- Readiness: database and Redis, not Kafka and not the LLM.
+- Test containers: `pgvector/pgvector:pg16` (the same image as compose) and `redis:7.4-alpine`, through Testcontainers generic containers; no new test library.
+
+Pull request 1: RAG (`feat/assistant-rag`)
+- [ ] Protocol files PROTO-001 to PROTO-003 in `src/main/resources/protocols/`; parser into sections
+- [ ] Schema `protocol_chunks` (untyped `vector`), idempotent ingestion; custom R2DBC repository with `<=>` (ADR 0002)
+- [ ] `LlmPort` (embedding and structured answer); `mock` adapter (default) and Gemini adapter with the starters; blocking calls on `boundedElastic`
+- [ ] `AskClinicalQuestionUseCase`: embed, retrieve, threshold gate, numbered prompt, structured output, citation validation, sources from metadata (ADR 0007)
+- [ ] `ResilientClinicalAnswerGenerator` decorator: circuit breaker, time limiter, 503 (ADR 0004)
+- [ ] `POST /asistente/consulta` (functional endpoint, MapStruct DTO mapper, global error handler on the shared base, role rule)
+- [ ] Metrics `assistant.llm.latency`, `assistant.answers` by outcome (`answered`, `no_protocol`, `rejected`, `degraded`), breaker state
+- [ ] Calibrate `assistant.rag.max-distance` of the `mock` provider with the three sample questions
+- [ ] ADR 0008 (Gemini, `mock`, discarded providers)
+
+Pull request 2: urgency view (`feat/assistant-urgency-view`)
+- [ ] Kafka listener (group `assistant-urgency-view`, manual acknowledgment after the script), Lua script with the rules of ADR 0021
+- [ ] Rebuild from the earliest offset when `urgency:meta` is missing
+- [ ] `GET /asistente/estado-urgencias` with the five levels, the total and `actualizadoEn`
+- [ ] Readiness with Redis; consumer side of the `traceparent` header (optional `correlationId`, A31)
 
 Modules: `triaxis-assistant-service`.
 
-Tests that must exist: sample questions 1 and 2 cite PROTO-001 and PROTO-002; question 3 (diabetes) returns the fixed notice with empty sources and the fake LLM is never invoked; invalid or unretrieved citation is rejected; breaker opens after failures and the endpoint answers 503; urgency view counts correct with duplicate events and out-of-order discharge; Redis view rebuilt from replay.
+Tests that must exist: sample questions 1 and 2 answer from and cite PROTO-001 and PROTO-002; question 3 (diabetes) returns the fixed notice with empty sources and the fake LLM is never invoked; an invalid or unretrieved citation and `NO_PROTOCOL` give the fixed notice; sources never come from model text; ingestion runs twice without duplicates and re-embeds on a model change; the breaker opens after failures and the endpoint answers 503, and a timeout counts as a failure; blank and too long questions give 400; 401, 403 and 200 per role; urgency view counts right with duplicate events, a missing registration, a discharge before the registration and a full replay; all five levels with zeros; BlockHound over the question flow and the listener; ArchUnit.
 
-Definition of done: `./gradlew :triaxis-assistant-service:test`.
-
-First commit: `feat(assistant): add RAG with validated citations and urgency view`
+Definition of done: `./gradlew build` passes, `scripts/check-docs.sh` passes, and a manual check with the compose infrastructure shows the three sample questions answered as expected with the `mock` provider and the urgency view following registrations and discharges made through triage.
 
 ## Phase 6: Operation report
 

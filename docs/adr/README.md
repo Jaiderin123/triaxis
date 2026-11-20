@@ -29,3 +29,4 @@ Ambiguities in the requirements specification that change behavior are recorded 
 | 0018 | [Shared web module and a single error format](0018-shared-web-module-and-error-format.md) | Accepted |
 | 0019 | [Observability: OpenTelemetry traces, ECS logs, metrics and health](0019-observability-opentelemetry-ecs-metrics.md) | Accepted |
 | 0020 | [API hardening: audience, body limit, rate limit and protected metrics](0020-api-hardening.md) | Accepted |
+| 0021 | [Idempotent urgency view that tolerates missing, repeated and late events](0021-idempotent-urgency-view.md) | Accepted |

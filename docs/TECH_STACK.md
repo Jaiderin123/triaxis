@@ -126,4 +126,4 @@ BlockHound on JDK 13+ may need the JVM flag `-XX:+AllowRedefinitionToAddDeleteMe
 - [x] Confirm exact versions (done as they were adopted; recheck image tags before the deployment).
 - [ ] Choose Azure Container Apps or AKS, and how Kafka, PostgreSQL and Redis run there.
 - [ ] Choose the alert channel and format for escalations.
-- [ ] Calibrate the similarity threshold with the Gemini embedding model.
+- [ ] Calibrate the similarity threshold with the Gemini embedding model (deferred until a key is available, ASSUMPTIONS A36).
