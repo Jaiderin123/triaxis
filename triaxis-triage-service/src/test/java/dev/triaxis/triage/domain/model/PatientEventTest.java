@@ -52,4 +52,26 @@ class PatientEventTest {
 				PatientStatus.IN_CONSULTATION, AT)).isInstanceOf(IllegalArgumentException.class);
 	}
 
+	@Test
+	void escalatedEventKeepsTheStatusAndCarriesTheFlag() {
+		Instant escalatedAt = AT.plusSeconds(600);
+		Patient escalated = patient(PatientStatus.REGISTERED).escalate(escalatedAt);
+
+		PatientEvent event = PatientEvent.escalated(EVENT_ID, escalated);
+
+		assertThat(event.type()).isEqualTo(PatientEventType.ESCALATED);
+		assertThat(event.previousStatus()).isEqualTo(PatientStatus.REGISTERED);
+		assertThat(event.newStatus()).isEqualTo(PatientStatus.REGISTERED);
+		assertThat(event.escalated()).isTrue();
+		assertThat(event.level()).isEqualTo(TriageLevel.CRITICAL);
+		assertThat(event.slaMinutes()).isEqualTo(5);
+		assertThat(event.occurredAt()).isEqualTo(escalatedAt);
+	}
+
+	@Test
+	void aPatientThatWasNotEscalatedHasNoEscalationEvent() {
+		assertThatThrownBy(() -> PatientEvent.escalated(EVENT_ID, patient(PatientStatus.REGISTERED)))
+				.isInstanceOf(IllegalArgumentException.class);
+	}
+
 }
