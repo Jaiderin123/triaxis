@@ -330,7 +330,7 @@ CREATE TABLE alert_deliveries (            -- escalation events already alerted 
 );
 ```
 
-The schema is created by initialization scripts executed through R2DBC (no Flyway, to avoid a second JDBC driver). Today each service runs its script at startup with the superuser of the container; phase 8 moves it to a separate step with an owner role and gives each service a least-privilege role (ADR 0024). Every R2DBC session runs in UTC, with `statement_timeout` 10 s and `lock_timeout` 5 s, set by a `ConnectionFactoryOptionsBuilderCustomizer` (`R2dbcSessionConfiguration`, ADR 0022); the tests run in a non-UTC JVM and check it. `patient_audit.patient_id` references `patients (id)`.
+The schema is created by initialization scripts executed through R2DBC (no Flyway, to avoid a second JDBC driver). Each service runs its script at startup with the superuser of the container; ADR 0024 (accepted, deferred) moves it to a separate step with an owner role and gives each service a least-privilege role. Every R2DBC session runs in UTC, with `statement_timeout` 10 s and `lock_timeout` 5 s, set by a `ConnectionFactoryOptionsBuilderCustomizer` (`R2dbcSessionConfiguration`, ADR 0022); the tests run in a non-UTC JVM and check it. `patient_audit.patient_id` references `patients (id)`.
 
 ### 6.5 Events and the transactional outbox
 
@@ -700,6 +700,9 @@ Event types: `paciente_registrado`, `paciente_en_consulta`, `paciente_alta`, `pa
 | `assistant.rag.question-max-length`, `assistant.rag.search-timeout`, `assistant.corpus.location`, `assistant.corpus.retry.*` | assistant | Question limit (1000), similarity search timeout (3 s), protocol folder, back-off of the corpus embedding |
 | `assistant.llm.timeout.*`, `resilience4j.circuitbreaker.instances.llm.*` | assistant | Timeouts (embedding 5 s, answer 20 s, `Retry-After` 30 s) and circuit breaker of the LLM calls (ADR 0004) |
 | `ASSISTANT_DB_URL`, `ASSISTANT_DB_USER`, `ASSISTANT_DB_PASSWORD` | assistant | PostgreSQL with pgvector (R2DBC) |
+| `REDIS_PASSWORD` (compose) / `SPRING_DATA_REDIS_PASSWORD` (assistant) | compose, assistant | Password of Redis; compose default `triaxis-local` (also in the `local` profile of the assistant), generated in Kubernetes |
+| `ASSISTANT_PROFILES` | compose, Kubernetes ConfigMap | Spring profiles of the assistant: empty (`mock`) by default, `gemini` in the `aks` overlay (A16) |
+| `AUTH_JWT_GENERATEKEYIFMISSING`, `AUTH_USERS_<n>_*` | compose, Kubernetes | The compose file generates the signing key and has the demonstration users; Kubernetes takes the key and the BCrypt hashes from `triaxis-secrets` |
 | `REDIS_HOST`, `REDIS_PORT`, `assistant.urgency.discharged-ttl`, `max-in-flight`, `redis-timeout`, `reset-timeout`, `startup-check.*` | assistant | Urgency view: Redis, discharged marker (30 days), records in flight (64), Redis timeout (2 s), reset (30 s), back-off of the wait when Redis does not answer at partition assignment (2 s up to 30 s) |
 
 **Backpressure and timeouts (ADR 0022).** Kafka consumers use `max.poll.records` and a bounded number of records in flight; the outbox relay works in batches. Every remote wait is bounded: the R2DBC pool (`max-size` 10, acquire and create 5 s) and the session (`statement_timeout`, `lock_timeout`), the JWKS download (connect 2 s, response 3 s), Kafka sends (`send-timeout`), Redis calls, and the LLM calls. Background loops have a per-cycle or per-batch timeout, so one stuck cycle never stops the loop.
@@ -728,21 +731,22 @@ Minimum coverage required: classification E1 to E6, valid and invalid transition
 
 ## 12. Deployment
 
-**Local:** one `docker-compose up` starts PostgreSQL (with pgvector, two databases created by an init script), Kafka (KRaft, topic created on startup), Redis, Jaeger (traces) and the three services. Default LLM profile is `mock`, so no API key is required.
+**Local:** `docker compose up --build` builds the images and starts PostgreSQL (with pgvector, two databases created by an init script), Kafka (KRaft, the topic created with a retention of 7 days), Redis (password, `noeviction`), Jaeger (traces) and the three services, configured by environment variables as in Kubernetes. The LLM is `mock`, so no API key is required; auth has the demonstration users and generates its signing key at startup (compose only). Every port is published on `127.0.0.1`.
 
 **Kubernetes manifests (`deploy/k8s/`):** namespace; Deployments for the three services with liveness and readiness probes and resource requests and limits; PostgreSQL, Kafka and Redis (single replica, with persistent volumes where needed); Services; ConfigMap and Secrets; one Ingress with path-based routing (`/auth`, `/triage`, `/asistente`). The same manifests are validated locally on kind or minikube. Rules that already apply to the images and manifests: configuration only through environment variables (table in section 10), graceful shutdown, readiness without Kafka for triage, `/actuator` not routed by the Ingress, a Secret for the metrics credentials, the signing key and the database passwords, non-root containers and pinned base image tags.
 
-**Azure (decided in ADR 0010, implemented in phase 8; not deployed yet):**
+**Azure (ADR 0010 and its revision; manifests and Terraform in `deploy/`):**
 
-- AKS with the free tier of the control plane and one node of about 8 GiB (size, region and price confirmed with the Azure calculator and the quota before the cluster is created).
+- AKS with the free tier of the control plane and one `Standard_B2ms` node (2 vCPU, 8 GiB) in `eastus2`, created by Terraform (`deploy/azure/terraform`) with the static public IP of the ingress and an optional budget.
 - PostgreSQL, Kafka and Redis run in the cluster as single-replica StatefulSets with persistent volumes; one replica of each service (the assistant must run as one, A39).
 - `deploy/k8s/` is a Kustomize base with the overlays `kind` and `aks` (`kubectl apply -k`).
-- Public images on GitHub Container Registry, built by a multi-stage Dockerfile per service (JDK 21 to build, JRE 21 to run, exact tags, non-root).
-- A maintained ingress controller (Traefik preferred) with the standard `Ingress` resource, an Azure DNS label as the host and a Let's Encrypt certificate from cert-manager; `/actuator` is not routed.
+- Public images on GitHub Container Registry, built by one multi-stage Dockerfile (`docker/service.Dockerfile`, JDK 21 to build, JRE 21 to run, exact tags, uid 10001); the pods run without root, with a read-only file system and no capabilities.
+- Traefik `v3.7.19`, installed by the base, with the standard `Ingress` resource and paths `/auth`, `/.well-known/jwks.json`, `/triage` and `/asistente`; on AKS the Azure DNS label is the host and Traefik gets the Let's Encrypt certificate itself (HTTP-01) and redirects HTTP to HTTPS. `/actuator` is not routed.
 - The assistant uses Gemini with `GEMINI_API_KEY` from a Secret (A16); alerts use the log channel (ADR 0011).
-- Secrets are created by a script from environment variables; the Azure CLI scripts of `deploy/azure/` create and delete the resources.
-- The schema is applied by a Job with the owner role of each database and the services use least-privilege roles (ADR 0024).
-- Cost control: a budget alert, the cluster stopped outside the demonstrations, the resource group deleted at the end; no Container Insights, and the Prometheus scrape and the export of traces stay optional and off.
+- The Secret `triaxis-secrets` is created by `deploy/scripts/create-secrets.sh` (generated passwords and signing key, BCrypt hashes of the users, the Gemini key from a local file); an existing Secret is kept. `deploy/azure/deploy.sh`, `stop.sh`, `start.sh` and `destroy.sh` wrap Terraform and `kubectl`.
+- The services still apply their schema at startup with the superuser of the container; the roles and the schema step of ADR 0024 are deferred.
+- Cost control: a budget alert, the cluster stopped before the delivery and running during the review window, the resource group deleted at the end; no Container Insights, and the Prometheus scrape and the export of traces stay optional and off.
+- The topic is created with a retention of 7 days by triage, the compose file and the Job of the manifests alike (ADR 0021).
 
 **CI (stretch):** GitHub Actions workflow that builds and runs the tests on every push.
 
