@@ -39,6 +39,9 @@ CREATE TABLE IF NOT EXISTS patients (
 
 CREATE INDEX IF NOT EXISTS idx_patients_sla ON patients (status, escalated, registered_at);
 
+-- Range filter of the operation report (RF-05).
+CREATE INDEX IF NOT EXISTS idx_patients_registered_at ON patients (registered_at);
+
 CREATE TABLE IF NOT EXISTS patient_audit (
   id              BIGSERIAL PRIMARY KEY,
   patient_id      UUID NOT NULL REFERENCES patients (id),

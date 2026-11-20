@@ -4,6 +4,7 @@ import java.time.Instant;
 
 import dev.triaxis.triage.application.port.in.ChangePatientStatusUseCase;
 import dev.triaxis.triage.application.port.in.EscalateOverduePatientsUseCase;
+import dev.triaxis.triage.application.port.in.GetOperationReportUseCase;
 import dev.triaxis.triage.application.port.in.GetPatientUseCase;
 import dev.triaxis.triage.application.port.in.RegisterPatientUseCase;
 import dev.triaxis.triage.application.port.out.AuditRepository;
@@ -11,10 +12,12 @@ import dev.triaxis.triage.application.port.out.ClockPort;
 import dev.triaxis.triage.application.port.out.EventPublisher;
 import dev.triaxis.triage.application.port.out.IdGenerator;
 import dev.triaxis.triage.application.port.out.PatientRepository;
+import dev.triaxis.triage.application.port.out.ReportQuery;
 import dev.triaxis.triage.application.port.out.TriageMetrics;
 import dev.triaxis.triage.application.port.out.UnitOfWork;
 import dev.triaxis.triage.application.service.ChangePatientStatusService;
 import dev.triaxis.triage.application.service.EscalateOverduePatientsService;
+import dev.triaxis.triage.application.service.GetOperationReportService;
 import dev.triaxis.triage.application.service.GetPatientService;
 import dev.triaxis.triage.application.service.RegisterPatientService;
 import dev.triaxis.triage.domain.service.ComplaintPolicy;
@@ -27,7 +30,7 @@ import org.springframework.context.annotation.Configuration;
 
 /** Wires the framework-free domain and application classes. */
 @Configuration
-@EnableConfigurationProperties({TriageProperties.class, EscalationProperties.class})
+@EnableConfigurationProperties({TriageProperties.class, EscalationProperties.class, ReportProperties.class})
 class TriageConfiguration {
 
 	@Bean
@@ -70,6 +73,11 @@ class TriageConfiguration {
 			EscalationProperties properties) {
 		return new EscalateOverduePatientsService(patients, audit, events, ids, clock, unitOfWork, metrics,
 				properties.batchSize());
+	}
+
+	@Bean
+	GetOperationReportUseCase getOperationReportUseCase(ReportQuery reports, ReportProperties properties) {
+		return new GetOperationReportService(reports, properties.maxRange());
 	}
 
 	@Bean
