@@ -89,3 +89,18 @@ CREATE INDEX IF NOT EXISTS idx_outbox_pending ON outbox_events (id) WHERE publis
 
 -- The W3C trace context of the request that caused the event; the relay sends it as a Kafka header.
 ALTER TABLE outbox_events ADD COLUMN IF NOT EXISTS traceparent VARCHAR(64);
+
+-- Escalation events already handled by the alert listener (ADR 0011, ASSUMPTIONS A45): an event recorded here is
+-- not alerted again. There is no reference to patients on purpose: an alert that could not be built for an
+-- unknown patient is recorded as FAILED too.
+CREATE TABLE IF NOT EXISTS alert_deliveries (
+  event_id   UUID PRIMARY KEY,
+  patient_id UUID NOT NULL,
+  outcome    VARCHAR(16) NOT NULL,
+  handled_at TIMESTAMPTZ NOT NULL
+);
+
+-- SKIPPED: the patient no longer waited when the event was handled (ADR 0023). Replaced, so it also applies to a
+-- table created before this outcome existed.
+ALTER TABLE alert_deliveries DROP CONSTRAINT IF EXISTS chk_alert_deliveries_outcome;
+ALTER TABLE alert_deliveries ADD CONSTRAINT chk_alert_deliveries_outcome CHECK (outcome IN ('SENT', 'FAILED', 'SKIPPED'));
