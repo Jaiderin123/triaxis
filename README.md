@@ -69,6 +69,7 @@ Everything is configured through environment variables; nothing secret is in the
 | triage (8081) | `POST /triage/pacientes` | `NURSE` |
 | triage (8081) | `PATCH /triage/pacientes/{id}/estado` | `NURSE`, `DOCTOR` |
 | triage (8081) | `GET /triage/pacientes/{id}` | `NURSE`, `DOCTOR` |
+| triage (8081) | `GET /triage/reportes/operacion?desde=2026-11-19&hasta=2026-11-19`: patients, levels and waits (average and p95) per UTC hour; dates or instants with a zone, at most 31 days | `DOCTOR` |
 | assistant (8082) | `POST /asistente/consulta` with `{ "pregunta": "..." }` | `DOCTOR` |
 | assistant (8082) | `GET /asistente/estado-urgencias`: active patients per level, built only from the Kafka events | `NURSE`, `DOCTOR` |
 
@@ -83,7 +84,7 @@ curl -s -X POST localhost:8082/asistente/consulta -H "Authorization: Bearer $TOK
 
 Security is deny-by-default: every route has an explicit role rule, so a path without one answers 401 without a token and 403 with one. Tokens are RS256 JWTs from the auth service and must carry `iss`, `aud` and `exp`.
 
-More endpoints (operation report) are added in later phases. Assumptions and ambiguities of the specification are in [docs/ASSUMPTIONS.md](docs/ASSUMPTIONS.md).
+More endpoints (alerts) are added in later phases. Assumptions and ambiguities of the specification are in [docs/ASSUMPTIONS.md](docs/ASSUMPTIONS.md).
 
 ## Decisions
 

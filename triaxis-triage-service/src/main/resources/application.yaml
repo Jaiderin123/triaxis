@@ -106,6 +106,10 @@ triage:
       URGENT_2: 30
       NOT_URGENT: 60
       NOT_URGENT_2: 120
+  report:
+    # Operation report (RF-05): longest range (A42) and the query timeout, longer than statement_timeout.
+    max-range: P31D
+    timeout: PT15S
   administrative-complaints:
     - documentos
     - recoleccion de resultados

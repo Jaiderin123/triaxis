@@ -25,7 +25,7 @@ Triaxis is a reactive digital triage system with a clinical assistant. Nurses re
 | `triaxis-security` | n/a | Library: shared resource-server (JWT) configuration |
 | `triaxis-web` | n/a | Library: standard error responses, access log, protected metrics, tracing (no business logic) |
 
-All six modules exist on Spring Boot 3.5.16 and `./gradlew build` passes. Done and released to `main`: the auth service and shared security (phase 1), the triage core with the audit (phase 2), the events through a transactional outbox with an ordered relay to Kafka (phase 3), the platform foundation (standard errors, OpenTelemetry, JSON logs, protected metrics, hardening), the SLA escalation (phase 4), the assistant (phase 5: RAG with validated citations, the degraded mode, the urgency view from Kafka in Redis), and the fixes of the review of 2026-11-19 (ADR 0022). Next: the operation report (phase 6). The status table and the resume notes are in `docs/PLAN.md`.
+All six modules exist on Spring Boot 3.5.16 and `./gradlew build` passes. Done and released to `main`: the auth service and shared security (phase 1), the triage core with the audit (phase 2), the events through a transactional outbox with an ordered relay to Kafka (phase 3), the platform foundation (standard errors, OpenTelemetry, JSON logs, protected metrics, hardening), the SLA escalation (phase 4), the assistant (phase 5: RAG with validated citations, the degraded mode, the urgency view from Kafka in Redis), the fixes of the review of 2026-11-19 (ADR 0022), and the operation report (phase 6: one SQL query with window functions). Next: the alerts to the medical team (phase 7). The status table and the resume notes are in `docs/PLAN.md`.
 
 ## Package layout (hexagonal, per service)
 

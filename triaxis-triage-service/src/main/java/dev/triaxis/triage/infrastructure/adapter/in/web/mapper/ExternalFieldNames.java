@@ -15,7 +15,9 @@ public final class ExternalFieldNames {
 			Map.entry("temperature", "temperatura"),
 			Map.entry("pain", "dolor"),
 			Map.entry("gcs", "gcs"),
-			Map.entry("chiefComplaint", "quejaPrincipal"));
+			Map.entry("chiefComplaint", "quejaPrincipal"),
+			Map.entry("from", "desde"),
+			Map.entry("to", "hasta"));
 
 	private ExternalFieldNames() {
 	}
