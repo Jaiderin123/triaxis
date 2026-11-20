@@ -259,3 +259,11 @@ A1 to A4 come from `ARCHITECTURE.md` section 6.2. A5 onward were added while pre
 - **Decision:** a record that cannot be read as an event, or has no patient, level, type or time, is logged without its payload, counted (`assistant.urgency.events`, outcome `invalid`) and acknowledged, so it never blocks the partition. A Redis failure is retried with back-off until it works, so no valid event is lost. The view is rebuilt from the beginning of the topic only when the consumer gets its partitions and the store has no `urgency:meta` key, that is at startup or after a restart with a new or lost Redis.
 - **Why:** a poison message must not stop the view for every later event; a valid event must never be dropped. With asynchronous acknowledgments a seek while records are in flight does not replay them, so the rebuild happens before any record is processed.
 - **Impact if wrong:** a Redis lost while the service runs leaves the view empty until the next restart; a restart (or a rolling restart in Kubernetes) rebuilds it. An invalid event is not counted, which only happens if the contract is broken.
+
+## A39. The assistant runs as a single replica
+
+- **Ambiguity:** the deployment can run several replicas of each service, but the rebuild of the urgency view (ADR 0021, A38) empties the shared Redis view and replays only the partitions assigned to the consumer that rebuilds it.
+- **Decision:** the assistant runs as **one replica** (`replicas: 1` in the Kubernetes manifests of phase 8). Triage and auth may run several. A negative count, which only a broken store or concurrent rebuilds could produce, is read as zero, logged and counted (`assistant.urgency.negative.counts`) instead of failing the read.
+- **Why:** coordinating a rebuild across replicas needs a distributed lock and an atomic swap of the view; one replica is enough for the expected load, and a restart takes seconds.
+- **Impact if wrong:** with two replicas, a rebuild can drop or double count the patients of some partitions until the next rebuild. Scaling out needs a coordinated rebuild first (listed in the improvements of `PLAN.md`).
+
