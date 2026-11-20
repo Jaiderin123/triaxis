@@ -16,6 +16,12 @@ spring:
     url: ${TRIAGE_DB_URL:}
     username: ${TRIAGE_DB_USER:}
     password: ${TRIAGE_DB_PASSWORD:}
+    pool:
+      # Explicit limits: without them the pool waits forever for a connection (r2dbc-pool has no default).
+      max-size: 10
+      max-acquire-time: 5s
+      max-create-connection-time: 5s
+      max-validation-time: 2s
   sql:
     init:
       mode: always
@@ -80,6 +86,10 @@ management:
         enabled: ${TRACING_EXPORT_ENABLED:false}
 
 triaxis:
+  database:
+    # Session limits set by R2dbcSessionConfiguration (PostgreSQL statement_timeout and lock_timeout).
+    statement-timeout: PT10S
+    lock-timeout: PT5S
   web:
     metrics:
       # Credentials of the metrics scraper; without a password /actuator/prometheus is denied.
@@ -107,12 +117,15 @@ triage:
     enabled: true
     interval: PT30S
     batch-size: 100
+    batch-timeout: PT20S
   outbox:
     relay:
       enabled: true
       interval: PT1S
       batch-size: 50
       send-timeout: PT15S
+      # A stuck cycle is cancelled and rolled back, and the loop goes on (its events are sent again).
+      cycle-timeout: PT60S
     topic:
       partitions: 3
       replicas: 1

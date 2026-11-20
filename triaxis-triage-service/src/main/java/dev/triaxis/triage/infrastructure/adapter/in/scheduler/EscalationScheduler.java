@@ -42,8 +42,8 @@ class EscalationScheduler implements SmartLifecycle {
 
 	/** Runs batches until one is not full, and returns how many patients were escalated in the cycle. */
 	Mono<Integer> runCycle() {
-		return escalation.escalateOverdue()
-				.expand(count -> count >= escalation.batchSize() ? escalation.escalateOverdue() : Mono.empty())
+		return batch()
+				.expand(count -> count >= escalation.batchSize() ? batch() : Mono.empty())
 				.reduce(0, Integer::sum)
 				.doOnNext(total -> {
 					if (total > 0) {
@@ -54,6 +54,11 @@ class EscalationScheduler implements SmartLifecycle {
 					log.warn("Escalation cycle failed, it will be retried on the next tick", error);
 					return Mono.just(0);
 				});
+	}
+
+	/** One batch with its own time limit, so a stuck database call never stops the loop. */
+	private Mono<Integer> batch() {
+		return escalation.escalateOverdue().timeout(properties.batchTimeout());
 	}
 
 	@Override
