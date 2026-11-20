@@ -78,7 +78,7 @@ Tasks
 - [x] `docs/private/` holds the requirements specification and is in `.gitignore`
 - [x] `git init`, first commit on `main`, create `develop`; set the repository-local `user.name` and `user.email` to the author's own identity; `.claude/` goes in `.git/info/exclude`
 - [x] Create the remote repository, push `main` and `develop`
-- [ ] Branch protection on `main` and `develop`: pull request required, no direct pushes or force-pushes, no required status checks because there is no CI (see `GIT_WORKFLOW.md`). It was marked done here by mistake and found missing in the review of 2026-11-19
+- [x] Branch protection on `main` and `develop`: pull request required (no approvals), no direct pushes or force-pushes (admins included), no deletion, no required status checks because there is no CI (see `GIT_WORKFLOW.md`). It was marked done here by mistake, found missing in the review of 2026-11-19 and applied on 2026-11-20 (checked with `gh api repos/Jaiderin123/triaxis/branches/<branch>/protection`)
 - [x] `triaxis-triage-service` fixed to Boot 3.5.16 (catalog plugins, Boot 3 starters, nested wrapper and `settings.gradle` removed, port 8081)
 - [x] Create `triaxis-common`, `triaxis-security`, `triaxis-assistant-service`, `triaxis-auth-service` (build files, main classes, `application.yml` with port and name only) and include them in `settings.gradle`
 - [x] `docker-compose.yml`: PostgreSQL with pgvector (two databases through an init script), Kafka (KRaft, topic `triaje.eventos` with 3 partitions), Redis
@@ -460,7 +460,7 @@ One entry per finished piece of work: what was done, decisions taken, how it was
   8. **Small items:** `toString` without secrets, the retries of Spring AI off (`max-attempts: 1`), the JUnit timeout in the assistant, and key files ignored.
 - **Decisions:** ADR 0022 (deny by default, bounded waits, UTC sessions); assumptions A39 (single replica of the assistant) and A40 (the SLA is fixed at registration); A3, A12, A13, A28, A29 and A38 updated.
 - **Moved to phase 8:** A2 (the rate limit behind the Ingress), database roles with the DDL out of the startup, compose ports on `127.0.0.1` with exact tags, and the Ingress without `/actuator`. The rest of the review is in the improvements below.
-- **Not done:** the branch protection was marked done in phase 0 but did not exist. It is unticked until it is applied.
+- **Branch protection:** it was marked done in phase 0 but did not exist. It was applied to `main` and `develop` on 2026-11-20 and checked through the API.
 - **Verified:**
   - `./gradlew build` passes for every module (453 tests) and `scripts/check-docs.sh` passes.
   - Each fix has a test that fails without it: the log capture, the session zone, the slow and unreachable JWKS, the stuck batch, the lost view, the negative count, a route without a rule and a token without `exp`.
