@@ -737,7 +737,7 @@ Minimum coverage required: classification E1 to E6, valid and invalid transition
 
 **Azure (ADR 0010 and its revision; manifests and Terraform in `deploy/`):**
 
-- AKS with the free tier of the control plane and one `Standard_B2ms` node (2 vCPU, 8 GiB) in `eastus2`, created by Terraform (`deploy/azure/terraform`) with the static public IP of the ingress and an optional budget.
+- AKS with the free tier of the control plane and one `Standard_D2as_v7` node (2 vCPU, 8 GiB, AMD, not burstable) in `eastus2`, created by Terraform (`deploy/azure/terraform`) with the static public IP of the ingress and an optional budget.
 - PostgreSQL, Kafka and Redis run in the cluster as single-replica StatefulSets with persistent volumes; one replica of each service (the assistant must run as one, A39).
 - `deploy/k8s/` is a Kustomize base with the overlays `kind` and `aks` (`kubectl apply -k`).
 - Public images on GitHub Container Registry, built by one multi-stage Dockerfile (`docker/service.Dockerfile`, JDK 21 to build, JRE 21 to run, exact tags, uid 10001); the pods run without root, with a read-only file system and no capabilities.

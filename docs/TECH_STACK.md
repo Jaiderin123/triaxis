@@ -90,7 +90,7 @@ The name must be checked on GitHub and Google before publishing, to avoid clashi
 | Containers | One Docker image per service, pinned base image tags (never `latest`) |
 | Local run | `docker-compose` that starts PostgreSQL, Kafka, Redis and all services with one command |
 | Orchestration | Kubernetes manifests (Deployment, Service, probes) |
-| Cloud | Azure Kubernetes Service, free tier, one `Standard_B2ms` node in `eastus2`, with PostgreSQL, Kafka and Redis in the cluster (ADR 0010) |
+| Cloud | Azure Kubernetes Service, free tier, one `Standard_D2as_v7` node (2 vCPU, 8 GiB) in `eastus2`, with PostgreSQL, Kafka and Redis in the cluster (ADR 0010) |
 | Images | One multi-stage Dockerfile for the three services (`docker/service.Dockerfile`, `--build-arg SERVICE`): `eclipse-temurin:21.0.10_7-jdk-noble` to build, `eclipse-temurin:21.0.10_7-jre-noble` to run, as uid 10001; public on GitHub Container Registry |
 | Manifests | Kustomize base with `kind` and `aks` overlays (`kubectl apply -k`, Kustomize v5.7.1 of kubectl 1.34.13); kind 0.33.0 for the local validation |
 | Infrastructure as code | Terraform 1.9.0 with the `hashicorp/azurerm` provider 4.81.0 (`deploy/azure/terraform`, lock file versioned) |

@@ -35,12 +35,12 @@ Every pull request of phases 6 to 9 checks, in addition to the build and `script
 
 ### Where to resume (phase 8)
 
-State on 2026-11-20: phases 0 to 7 are released to `main` (tags up to `phase-7-alerts`). Phase 8 is in progress on `feat/phase-8-deployment` (delivery on 2026-11-21). Part A is done and verified: the shared Dockerfile, `docker compose up --build` with the sample flow, and the manifests on kind with the sample flow through the Ingress. Part B is written and checked without Azure only (Terraform `validate`; the `aks` overlay accepted by a server-side dry run on kind; the redirect to HTTPS tested on a Traefik pod in kind, which showed that redirecting to the `websecure` entry point leaks its container port 8443, so it redirects to `:443`); nothing was created on Azure yet.
+State on 2026-11-20: phases 0 to 7 are released to `main` (tags up to `phase-7-alerts`). Phase 8 is in progress on `feat/phase-8-deployment` (delivery on 2026-11-21). Part A is done and verified: the shared Dockerfile, `docker compose up --build` with the sample flow, and the manifests on kind with the sample flow through the Ingress. Part B is deployed on 2026-11-20: https://triaxis-demo.eastus2.cloudapp.azure.com answers the sample flow over HTTPS with a Let's Encrypt certificate, including a question to Gemini with its citation (PROTO-002); the demo passwords are refused there. The first apply found two defects, fixed in the `aks` overlay: it had no namespace, so the ACME volume was created in `default`, and the `fsGroup` of Traefik left `acme.json` at mode 660, which Traefik refuses, so an init container resets it to 600. Not done yet: the budget alert check, `stop.sh` and `start.sh`, and two fixes of `deploy.sh` (push the images before Terraform; apply a saved plan, because `terraform apply -input=false` cannot be confirmed without a terminal). Before the deployment, part B was checked without Azure (Terraform `validate`; the `aks` overlay accepted by a server-side dry run on kind; the redirect to HTTPS tested on a Traefik pod in kind, which showed that redirecting to the `websecure` entry point leaks its container port 8443, so it redirects to `:443`)).
 
 Next, on the evening of 2026-11-20 (the owner of the project runs or approves every step on Azure):
-1. Register the resource providers (`Microsoft.ContainerService`, `Compute`, `Network`, `Storage`), check the quota of `Standard_B2ms` in `eastus2` (free trial subscription) and that the DNS label `triaxis-demo` is free; otherwise change `dns_label` and the host of the `aks` overlay together.
-2. Create `deploy/azure/terraform/terraform.tfvars` and the files `~/.config/triaxis/ghcr.env` and `deploy.env`.
-3. `deploy/azure/deploy.sh`, make the three GHCR packages public, run the sample flow over HTTPS (with a question to Gemini), record the URL in the README.
+1. Done on 2026-11-20: the resource providers are registered (`Microsoft.ContainerService`, `Compute`, `Network`, `Storage`); in `eastus2` the quota is 4 vCPU and 3 public IP addresses, and the DNS label `triaxis-demo` is free. No B-series size is offered to the subscription, so the node is `Standard_D2as_v7` (approved, see the revision of ADR 0010). `terraform.tfvars` and `~/.config/triaxis/deploy.env` exist (both git-ignored or outside the repository).
+2. Done: `~/.config/triaxis/ghcr.env` exists (the token of the gh CLI with `write:packages`), the images `0.8.0` are pushed and public.
+3. Done: the saved plan was applied by hand (`terraform apply triaxis.tfplan`, then the Secret, the overlay and the wait of `deploy.sh`), the sample flow passed over HTTPS and the URL is in the README. Still to do: the two fixes of `deploy.sh` described above.
 4. `deploy/azure/stop.sh` until the delivery; start it when the repository is handed in and keep it running during the review window; `destroy.sh` at the end.
 5. Then the pull requests (phase 8 to `develop` and `main`, tag `phase-8-deployment`) and phase 9 (docs).
 
@@ -328,7 +328,7 @@ Prerequisites outside the repository (the user prepares them before the phase st
 - A GitHub token that can publish packages to GHCR, and the packages made public after the first push.
 - The Gemini key (already in `~/.config/triaxis/gemini.env`) and the passwords of the deployed users of auth.
 
-Revision on 2026-11-20 (approved; delivery on 2026-11-21): Terraform creates the Azure resources instead of Azure CLI scripts, Traefik gets the Let's Encrypt certificate itself instead of cert-manager, one shared Dockerfile builds the three images, and the node is `Standard_B2ms` in `eastus2`. Only the essentials of the specification are built before the delivery; the database roles with the schema step (ADR 0024) and the rate limit behind the Ingress moved to "Improvements" (see the revision of ADR 0010).
+Revision on 2026-11-20 (approved; delivery on 2026-11-21): Terraform creates the Azure resources instead of Azure CLI scripts, Traefik gets the Let's Encrypt certificate itself instead of cert-manager, one shared Dockerfile builds the three images, and the node is `Standard_D2as_v7` in `eastus2` (the B-series is not offered to the free trial subscription). Only the essentials of the specification are built before the delivery; the database roles with the schema step (ADR 0024) and the rate limit behind the Ingress moved to "Improvements" (see the revision of ADR 0010).
 
 Tasks, part A: local (needs no Azure)
 - [x] One multi-stage Dockerfile for the three services (`docker/service.Dockerfile`) and a `.dockerignore`; non-root user, exact base image tags
@@ -338,8 +338,8 @@ Tasks, part A: local (needs no Azure)
 
 Tasks, part B: Azure
 - [ ] Terraform in `deploy/azure/terraform` (resource group, AKS free tier with one node, static public IP with the DNS label, optional budget), `terraform validate` passing, and the wrapper scripts (`deploy.sh`, `push-images.sh`, `stop.sh`, `start.sh`, `destroy.sh`)
-- [ ] Overlay `aks`: images from GHCR, Gemini, the static IP, Let's Encrypt and the redirect to HTTPS
-- [ ] The first apply on Azure, the images pushed and made public, and the sample flow over HTTPS on the public address, including a question to Gemini with its citations; record the URL in the README
+- [x] Overlay `aks`: images from GHCR, Gemini, the static IP, Let's Encrypt and the redirect to HTTPS
+- [x] The first apply on Azure, the images pushed and made public, and the sample flow over HTTPS on the public address, including a question to Gemini with its citations; record the URL in the README
 - [ ] The budget alert checked, and the cluster stopped until the delivery, then running during the review window
 
 Checks that must exist:
