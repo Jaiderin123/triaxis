@@ -533,8 +533,8 @@ Classes (hexagonal layout of section 5):
 Defense in depth, so no single layer is trusted alone:
 
 1. **Retrieval gate.** If no excerpt is close enough, the service answers with the fixed notice and **does not call the LLM**. This is deterministic and also covers the diabetes example.
-2. **Constrained prompt.** Temperature 0, JSON output, answer only from the numbered excerpts (no doses, drugs or recommendations that are not in them), return the **numbers of the excerpts used**, or `noProtocol: true` when the excerpts are not enough, and ignore instructions inside the question or the excerpts.
-3. **Validated citations.** The sources in the response are built from corpus metadata (protocol id and section) for the ids the model reports, never from free text written by the model. If the model returns no valid id, or an id that was not retrieved, the answer is rejected and replaced by the fixed notice (a metric counts rejections).
+2. **Constrained prompt.** Temperature 0, JSON output, answer only from the numbered excerpts (no doses, drugs or recommendations that are not in them), return the **numbers of the excerpts used**, or `noProtocol: true` when the excerpts are not enough, and ignore instructions inside the question or the excerpts. The excerpts and the question go in their own tags (`<extractos>`, `<pregunta>`), and the question is reduced to one line without those tags and with excerpt markers such as `[2]` rewritten as `(2)`, so it cannot forge an excerpt (ADR 0025).
+3. **Validated citations.** The sources in the response are built from corpus metadata (protocol id and section) for the ids the model reports, never from free text written by the model. If the model returns no valid id, or an id that was not retrieved, the answer is rejected and replaced by the fixed notice (a metric counts rejections). Every number of the answer (a dose, a percentage, a time) must also be written in a cited excerpt, or the answer is rejected the same way (ADR 0025).
 4. **No clinical content in the fallback.** Fixed notices contain no generated medical text.
 
 The similarity threshold depends on the embedding model and is calibrated with the three sample questions (hypertension, sepsis, diabetes). Retrieval returns the top `assistant.rag.top-k` chunks (4), and only those within `assistant.rag.max-distance` are sent to the model, numbered `[1]`, `[2]`, and so on. The model answers in Spanish with JSON (`answer`, `excerpts` with the numbers used, `noProtocol`). The `mock` provider (default) uses deterministic embeddings (normalized bag of words in 512 dimensions) and an extractive answer that copies the closest excerpt, so it never writes clinical text of its own either. Thresholds (ASSUMPTIONS A36): `mock` 0.70, Gemini (`gemini-embedding-001`, 768 dimensions) 0.33, both calibrated with the sample questions; Gemini also with questions outside the corpus. The details are in ADR 0007 (anti-hallucination) and ADR 0008 (providers).
@@ -616,7 +616,7 @@ The assistant **never calls the triage API**. A consumer in its own group (`assi
 
 | Method and path | Role | Success | Errors |
 |---|---|---|---|
-| `POST /asistente/consulta` body `{ "pregunta": "..." }` | DOCTOR | 200 `{ "respuesta": "...", "fuentes": [ { "protocolo": "PROTO-001", "seccion": "..." } ] }`. If no protocol applies: 200 with `respuesta` = "No existe un protocolo disponible para esta pregunta." and `fuentes: []` | 400 (blank question or longer than 1000 characters), 401, 403, 503 (LLM unavailable) |
+| `POST /asistente/consulta` body `{ "pregunta": "..." }` (at most 10 per minute per user, ADR 0025) | DOCTOR | 200 `{ "respuesta": "...", "fuentes": [ { "protocolo": "PROTO-001", "seccion": "..." } ] }`. If no protocol applies: 200 with `respuesta` = "No existe un protocolo disponible para esta pregunta." and `fuentes: []` | 400 (blank question or longer than 1000 characters), 401, 403, 429 with `Retry-After` (over the limit per user), 503 (LLM unavailable or busy) |
 | `GET /asistente/estado-urgencias` | NURSE, DOCTOR | 200 `{ "porNivel": {...five levels...}, "total": n, "actualizadoEn": "..." }` (section 7.5) | 401, 403, 503 with `Retry-After` when Redis does not answer |
 
 `seccion` is the section title as written in the corpus (for example `Medidas iniciales`). Errors use the shared RFC 7807 format (section 10).
@@ -700,6 +700,7 @@ Event types: `paciente_registrado`, `paciente_en_consulta`, `paciente_alta`, `pa
 | `assistant.llm.provider` (`mock` by default), profile `gemini`, `GEMINI_API_KEY`, `GEMINI_CHAT_MODEL`, `GEMINI_EMBEDDING_MODEL` | assistant | LLM selection, models and key (key from the environment only); without the `gemini` profile the Gemini auto-configuration is off (ADR 0008) |
 | `assistant.rag.question-max-length`, `assistant.rag.search-timeout`, `assistant.corpus.location`, `assistant.corpus.retry.*` | assistant | Question limit (1000), similarity search timeout (3 s), protocol folder, back-off of the corpus embedding (positive, the maximum not shorter than the initial one) |
 | `assistant.llm.timeout.*`, `resilience4j.circuitbreaker.instances.llm.*` | assistant | Timeouts (embedding 5 s, answer 20 s, `Retry-After` 30 s; positive durations, validated at startup) and circuit breaker of the LLM calls (ADR 0004) |
+| `resilience4j.ratelimiter.configs.question.*` (`ASSISTANT_QUESTIONS_PER_MINUTE`), `resilience4j.bulkhead.instances.llm.*` (`ASSISTANT_LLM_MAX_CONCURRENT_CALLS`) | assistant | Questions per user and minute (10, then 429 with `Retry-After`) and calls to the provider in flight (4, then 503), ADR 0025 |
 | `ASSISTANT_DB_URL`, `ASSISTANT_DB_USER`, `ASSISTANT_DB_PASSWORD` | assistant | PostgreSQL with pgvector (R2DBC) |
 | `REDIS_PASSWORD` (compose) / `SPRING_DATA_REDIS_PASSWORD` (assistant) | compose, assistant | Password of Redis; compose default `triaxis-local` (also in the `local` profile of the assistant), generated in Kubernetes |
 | `ASSISTANT_PROFILES` | compose, Kubernetes ConfigMap | Spring profiles of the assistant: empty (`mock`) by default, `gemini` in the `aks` overlay (A16) |
@@ -793,7 +794,8 @@ Status `written` means the file exists in `docs/adr/` (checked by `scripts/check
 | 0021 | Idempotent urgency view that tolerates missing, repeated and late events | written |
 | 0022 | Deny by default, bounded waits and UTC sessions (from the review of 2026-11-19) | written |
 | 0023 | Alerts only for patients that still wait (partly supersedes 0011) | written |
-| 0024 | A database role per service, and the schema applied outside the startup (implemented in phase 8) | written |
+| 0024 | A database role per service, and the schema applied outside the startup (accepted, deferred after the delivery) | written |
+| 0025 | Limits and prompt protection of the clinical assistant | written |
 
 At least two are required; the more concrete ones (0001, 0002, 0006, 0007) are the priority.
 

@@ -38,4 +38,5 @@ Ambiguities in the requirements specification that change behavior are recorded 
 | 0021 | [Idempotent urgency view that tolerates missing, repeated and late events](0021-idempotent-urgency-view.md) | Accepted |
 | 0022 | [Deny by default, bounded waits and UTC sessions](0022-deny-by-default-and-bounded-waits.md) | Accepted |
 | 0023 | [Alerts only for patients that still wait](0023-alerts-only-for-waiting-patients.md) | Accepted |
-| 0024 | [A database role per service, and the schema applied outside the startup](0024-database-roles-and-schema-outside-startup.md) | Accepted (implemented in phase 8) |
+| 0024 | [A database role per service, and the schema applied outside the startup](0024-database-roles-and-schema-outside-startup.md) | Accepted, deferred after the delivery |
+| 0025 | [Limits and prompt protection of the clinical assistant](0025-limits-and-prompt-protection-of-the-assistant.md) | Accepted |

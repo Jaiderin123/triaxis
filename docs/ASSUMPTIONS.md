@@ -332,3 +332,10 @@ A1 to A4 come from `ARCHITECTURE.md` section 6.2. A5 onward were added while pre
 - **Decision:** the host name is the free DNS label of the public IP in Azure (`<label>.<region>.cloudapp.azure.com`), served over HTTPS with a Let's Encrypt certificate that Traefik obtains itself (HTTP-01, revision of ADR 0010). The paths are those of the local run (`/auth`, `/.well-known/jwks.json`, `/triage`, `/asistente`); `/actuator` is not public. The issuer of the tokens stays `triaxis-auth` (a name, not an address), and the services read the JWKS from auth inside the cluster (`AUTH_JWKS_URI`), without leaving it.
 - **Why:** the tokens must not travel in clear over the internet, and no domain has to be bought.
 - **Impact if wrong:** a custom domain is a change of the overlay and the certificate only.
+
+## A49. Limits of the clinical assistant
+
+- **Ambiguity:** the specification asks for resilience when the LLM fails, but says nothing about how many questions a user may ask, while the free quota of the provider is small and shared by every user.
+- **Decision:** at most 10 questions per minute per user (the `sub` of the token), then 429 with `Retry-After`; at most 4 calls to the provider in flight, then 503. Every question counts, answered or not (ADR 0025).
+- **Why:** a doctor asks a few questions per minute at most, so 10 leaves margin, and one user cannot spend the quota of the others; 4 calls in flight absorb several doctors at once on one replica.
+- **Impact if wrong:** the values are configuration (`ASSISTANT_QUESTIONS_PER_MINUTE`, `ASSISTANT_LLM_MAX_CONCURRENT_CALLS`).
