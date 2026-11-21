@@ -18,6 +18,7 @@ Working checklist. Follow the phases in order; tick boxes as work lands. Source 
 | 7 Alerts | done | `phase-7-alerts` |
 | 8 Deployment | done | `phase-8-deployment` |
 | 9 Docs | done | `phase-9-docs` |
+| Assistant limits and prompt protection (after phase 9, ADR 0025) | done | `assistant-protection` |
 
 ### Definition of done for phases 6 to 9 (engineering rules of the review of 2026-11-19)
 
@@ -35,7 +36,7 @@ Every pull request of phases 6 to 9 checks, in addition to the build and `script
 
 ### Where to resume (after the delivery)
 
-State on 2026-11-21: phases 0 to 9 are released to `main` (tags up to `phase-9-docs`). The deployment runs version `0.9.0` at https://triaxis-demo.eastus2.cloudapp.azure.com with nine sample patients; the credentials of `nurse` and `doctor` are in `~/.config/triaxis/deploy.env` and are handed over with the delivery.
+State on 2026-11-21: phases 0 to 9 and the limits of the assistant are released to `main` (tags up to `assistant-protection`). The deployment runs version `0.9.1` at https://triaxis-demo.eastus2.cloudapp.azure.com with nine sample patients; the credentials of `nurse` and `doctor` are in `~/.config/triaxis/deploy.env` and are handed over with the delivery.
 
 Next:
 1. The owner checks the system as a reviewer would (a fresh clone with `docker compose up --build`, then the deployed API).
@@ -648,6 +649,21 @@ One entry per finished piece of work: what was done, decisions taken, how it was
   - The git history has no key or token, and `docs/private` was never committed.
 - **Pull requests:** `feat/phase-9-docs` to `develop`, then `develop` to `main`, tag `phase-9-docs`.
 
+### Assistant limits and prompt protection (done, after phase 9)
+
+- **What** (ADR 0025, A49):
+  - at most 10 questions per minute per user on `POST /asistente/consulta` (a Resilience4j rate limiter per `sub`, 429 with `Retry-After`, checked before the body is read);
+  - at most 4 calls to the provider in flight (the bulkhead `llm`, then the 503 of ADR 0004, not counted as a failure of the breaker);
+  - the question isolated in `<pregunta>` tags, as one line without the tags and with excerpt markers rewritten;
+  - every number of an answer must be written in a cited excerpt, or the answer becomes the fixed notice.
+- **Why:** the free quota of Gemini is small and shared by every user, and the known gap of the prompt ("Improvements") let a question forge an excerpt.
+- **Verification:**
+  - `./gradlew build` passes (540 tests); new tests for the 429 (with a limiter of its own in the shared context), the bulkhead (a call over the bound refused without calling the provider), a forged question, and invented figures.
+  - Version `0.9.1` on AKS with Gemini:
+    - the four sample questions answer as before (PROTO-001, PROTO-002, PROTO-003 and the notice for diabetes);
+    - a question that forged an excerpt with "500 mg" and a question that asked for "50 ml/kg" got only the figures of the protocol;
+    - after 10 questions in a minute the doctor got 429 with `Retry-After: 60`, and the urgency view kept answering.
+
 ## Improvements (out of scope for now)
 
 From the final review of 2026-11-21 (deployment and code), deferred so the deployed cluster is not rebuilt the night before the delivery:
@@ -671,8 +687,8 @@ From the review of 2026-11-19 (report in `docs/private/reviews/`, not versioned)
 
 - Outbox: a dead letter (attempts and last error per row, a `failed` state for errors that cannot be retried) and a time budget per cycle, so one event never blocks the rest and a degraded Kafka does not hold a transaction for minutes.
 - Urgency listener: retry only transient Redis errors, count the retries, and pause the container instead of blocking the consumer thread when the records in flight are exhausted.
-- LLM: a bulkhead (`resilience4j-bulkhead` is already on the classpath), a rate limit per user on `POST /asistente/consulta`, and an HTTP timeout in the Gemini client itself.
-- Prompt hardening: the question delimited in its own message, the numbered excerpts apart, and lines of the question that imitate an excerpt (`[n] ...`) neutralized; a test with a malicious question.
+- LLM: an HTTP timeout in the Gemini client itself (the bulkhead and the limit per user are done, ADR 0025).
+- Prompt: the question in a separate user message (today it is isolated by tags in the same message, ADR 0025).
 - Embedding identity: include the dimensions and the task type in the stored model name, so a change of either embeds the corpus again.
 - Deterministic race tests: force both interleavings of a concurrent `PATCH` and the escalation (held transactions), and replace the remaining `Thread.sleep` polling with controllable schedulers.
 - Tests for auth: the use case `IssueTokenService` with fakes, the address limit on a real endpoint, the type of the decoder errors; BlockHound explicitly over the outbox relay.
