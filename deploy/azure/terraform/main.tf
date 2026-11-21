@@ -30,6 +30,13 @@ resource "azurerm_kubernetes_cluster" "triaxis" {
     os_disk_size_gb             = var.node_os_disk_gb
     os_disk_type                = "Managed"
     temporary_name_for_rotation = "systemtmp"
+
+    # The values AKS sets by itself; declared so that a later plan shows no change.
+    upgrade_settings {
+      max_surge                     = "10%"
+      drain_timeout_in_minutes      = 0
+      node_soak_duration_in_minutes = 0
+    }
   }
 
   identity {
