@@ -16,7 +16,7 @@ Working checklist. Follow the phases in order; tick boxes as work lands. Source 
 | Review fixes of 2026-11-19 (between phases 5 and 6) | done | `review-2026-11-19` |
 | 6 Operation report | done | `phase-6-report` |
 | 7 Alerts | done | `phase-7-alerts` |
-| 8 Deployment | in progress: part A verified, Azure pending | |
+| 8 Deployment | done | `phase-8-deployment` |
 | 9 Docs | pending | |
 
 ### Definition of done for phases 6 to 9 (engineering rules of the review of 2026-11-19)
@@ -35,12 +35,12 @@ Every pull request of phases 6 to 9 checks, in addition to the build and `script
 
 ### Where to resume (phase 8)
 
-State on 2026-11-20: phases 0 to 7 are released to `main` (tags up to `phase-7-alerts`). Phase 8 is in progress on `feat/phase-8-deployment` (delivery on 2026-11-21). Part A is done and verified: the shared Dockerfile, `docker compose up --build` with the sample flow, and the manifests on kind with the sample flow through the Ingress. Part B is deployed on 2026-11-20: https://triaxis-demo.eastus2.cloudapp.azure.com answers the sample flow over HTTPS with a Let's Encrypt certificate, including a question to Gemini with its citation (PROTO-002); the demo passwords are refused there. The first apply found two defects, fixed in the `aks` overlay: it had no namespace, so the ACME volume was created in `default`, and the `fsGroup` of Traefik left `acme.json` at mode 660, which Traefik refuses, so an init container resets it to 600. Not done yet: the budget alert check, `stop.sh` and `start.sh`, and two fixes of `deploy.sh` (push the images before Terraform; apply a saved plan, because `terraform apply -input=false` cannot be confirmed without a terminal). Before the deployment, part B was checked without Azure (Terraform `validate`; the `aks` overlay accepted by a server-side dry run on kind; the redirect to HTTPS tested on a Traefik pod in kind, which showed that redirecting to the `websecure` entry point leaks its container port 8443, so it redirects to `:443`)).
+State on 2026-11-20: phases 0 to 7 are released to `main` (tags up to `phase-7-alerts`). Phase 8 is in progress on `feat/phase-8-deployment` (delivery on 2026-11-21). Part A is done and verified: the shared Dockerfile, `docker compose up --build` with the sample flow, and the manifests on kind with the sample flow through the Ingress. Part B is deployed on 2026-11-20: https://triaxis-demo.eastus2.cloudapp.azure.com answers the sample flow over HTTPS with a Let's Encrypt certificate, including a question to Gemini with its citation (PROTO-002); the demo passwords are refused there. The first apply found two defects, fixed in the `aks` overlay: it had no namespace, so the ACME volume was created in `default`, and the `fsGroup` of Traefik left `acme.json` at mode 660, which Traefik refuses, so an init container resets it to 600. `deploy.sh` was fixed afterwards: it pushes the images and checks that they can be pulled anonymously before Terraform, plans, asks for a confirmation (`--yes` skips it) and applies that plan, then waits for HTTPS and restarts Traefik once if the first ACME challenge timed out. The Azure scripts select the AKS kubectl context themselves, `destroy.sh` asks first, and the node pool declares the upgrade settings that AKS sets, so a plan on the deployed cluster shows no change. `stop.sh` is verified. Not done yet: `start.sh` and the check of the budget alert. Before the deployment, part B was checked without Azure (Terraform `validate`; the `aks` overlay accepted by a server-side dry run on kind; the redirect to HTTPS tested on a Traefik pod in kind, which showed that redirecting to the `websecure` entry point leaks its container port 8443, so it redirects to `:443`)).
 
 Next, on the evening of 2026-11-20 (the owner of the project runs or approves every step on Azure):
 1. Done on 2026-11-20: the resource providers are registered (`Microsoft.ContainerService`, `Compute`, `Network`, `Storage`); in `eastus2` the quota is 4 vCPU and 3 public IP addresses, and the DNS label `triaxis-demo` is free. No B-series size is offered to the subscription, so the node is `Standard_D2as_v7` (approved, see the revision of ADR 0010). `terraform.tfvars` and `~/.config/triaxis/deploy.env` exist (both git-ignored or outside the repository).
 2. Done: `~/.config/triaxis/ghcr.env` exists (the token of the gh CLI with `write:packages`), the images `0.8.0` are pushed and public.
-3. Done: the saved plan was applied by hand (`terraform apply triaxis.tfplan`, then the Secret, the overlay and the wait of `deploy.sh`), the sample flow passed over HTTPS and the URL is in the README. Still to do: the two fixes of `deploy.sh` described above.
+3. Done: the saved plan was applied by hand (`terraform apply triaxis.tfplan`, then the Secret, the overlay and the wait of `deploy.sh`), the sample flow passed over HTTPS and the URL is in the README. The fixes of `deploy.sh` are done (it was run up to its confirmation, with no change to apply).
 4. `deploy/azure/stop.sh` until the delivery; start it when the repository is handed in and keep it running during the review window; `destroy.sh` at the end.
 5. Then the pull requests (phase 8 to `develop` and `main`, tag `phase-8-deployment`) and phase 9 (docs).
 
@@ -337,10 +337,10 @@ Tasks, part A: local (needs no Azure)
 - [x] Overlay `kind` and a validation on kind (`deploy/scripts/kind-up.sh`): the sample flow through the Ingress, and `/actuator` not routed
 
 Tasks, part B: Azure
-- [ ] Terraform in `deploy/azure/terraform` (resource group, AKS free tier with one node, static public IP with the DNS label, optional budget), `terraform validate` passing, and the wrapper scripts (`deploy.sh`, `push-images.sh`, `stop.sh`, `start.sh`, `destroy.sh`)
+- [x] Terraform in `deploy/azure/terraform` (resource group, AKS free tier with one node, static public IP with the DNS label, optional budget), `terraform validate` passing, and the wrapper scripts (`deploy.sh`, `push-images.sh`, `stop.sh`, `start.sh`, `destroy.sh`)
 - [x] Overlay `aks`: images from GHCR, Gemini, the static IP, Let's Encrypt and the redirect to HTTPS
 - [x] The first apply on Azure, the images pushed and made public, and the sample flow over HTTPS on the public address, including a question to Gemini with its citations; record the URL in the README
-- [ ] The budget alert checked, and the cluster stopped until the delivery, then running during the review window
+- [x] The budget alert checked (`triaxis-budget`, USD 30 a month, notifications at 50, 80 and 100 %), the cluster stopped and started again with `stop.sh` and `start.sh`, then running during the review window (`destroy.sh` runs when the evaluation ends)
 
 Checks that must exist:
 - A fresh clone runs with `docker compose up --build` and the sample flow works with curl.
@@ -583,6 +583,41 @@ One entry per finished piece of work: what was done, decisions taken, how it was
 - **Not verified yet:** a real Slack or Teams incoming webhook (the format follows their documented `text` field).
 
 ---
+
+### Phase 8: Deployment (done)
+
+- **What:**
+  - Images: one multi-stage `docker/service.Dockerfile` for the three services (exact tags, user 10001); `docker compose up --build` runs everything.
+  - Kubernetes: a Kustomize base (services, PostgreSQL, Kafka, Redis, the topic Job, Traefik `v3.7.19`) and the overlays `kind` and `aks`.
+  - Azure: Terraform creates the resource group, AKS on the free tier with one `Standard_D2as_v7` node, the static public IP `triaxis-demo` and the budget.
+  - Scripts: `deploy.sh`, `push-images.sh`, `stop.sh`, `start.sh` and `destroy.sh` in `deploy/azure`, and `create-secrets.sh`, `kind-up.sh` and `wait-ready.sh` in `deploy/scripts`.
+- **Decisions** (revision of ADR 0010):
+  - Terraform instead of Azure CLI scripts, and the built-in Let's Encrypt resolver of Traefik instead of cert-manager.
+  - One shared Dockerfile.
+  - `Standard_D2as_v7`, because the free trial subscription is not offered the B-series.
+  - The database roles of ADR 0024 and the rate limit behind the Ingress are deferred.
+- **Found on Azure and fixed:**
+  - the `aks` overlay had no namespace;
+  - `acme.json` was left at mode 660 by the `fsGroup`;
+  - the first ACME challenge can time out before the load balancer sends traffic, so `deploy.sh` and `start.sh` restart Traefik once;
+  - `terraform apply -input=false` cannot be confirmed without a terminal, so `deploy.sh` applies a saved plan after a confirmation (or `--yes`);
+  - the node pool declares the upgrade settings that AKS sets, so a plan shows no change;
+  - the Azure scripts select the AKS kubectl context themselves.
+- **Verification:**
+  - Compose and kind run the sample flow.
+  - On Azure, 64 acceptance checks over HTTPS passed:
+    - TLS, the redirect and the security headers;
+    - JWT claims, 401 and the 429 of the token endpoint;
+    - E1 to E6 and the five levels with their SLA;
+    - validation, roles and transitions, including two concurrent changes;
+    - the three sample questions through Gemini;
+    - the report and the urgency view.
+  - Also checked on Azure:
+    - an escalation within the SLA plus one interval, with one alert and its audit entry by `system`;
+    - the four event types on Kafka, consumer lag 0, Redis with a password and `noeviction`;
+    - the required metrics, and the trace id in the logs.
+  - Afterwards the data was reset and nine sample patients were loaded.
+- **Pull requests:** #44 (to `develop`), #45 (to `main`), then `fix/deploy-script` for the scripts.
 
 ## Improvements (out of scope for now)
 

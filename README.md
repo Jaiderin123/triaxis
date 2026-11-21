@@ -137,9 +137,9 @@ kind delete cluster --name triaxis
 
 ```bash
 cp deploy/azure/terraform/terraform.tfvars.example deploy/azure/terraform/terraform.tfvars   # set subscription_id
-deploy/azure/deploy.sh     # terraform apply, images to GHCR, Secret, kubectl apply -k deploy/k8s/overlays/aks
-deploy/azure/stop.sh       # stop the node between demonstrations; start.sh starts it again
-deploy/azure/destroy.sh    # delete everything
+deploy/azure/deploy.sh     # images to GHCR (they must be public), terraform plan, confirm, apply that plan, Secret, aks overlay, wait for HTTPS
+deploy/azure/stop.sh       # stop the node between demonstrations; start.sh starts it again and waits for HTTPS
+deploy/azure/destroy.sh    # delete everything (asks first; --yes skips the question, also for deploy.sh)
 ```
 
 The scripts read local files outside the repository: `~/.config/triaxis/ghcr.env` (a GitHub token that can publish packages), `deploy.env` (the passwords of the deployed users) and `gemini.env`. The deployed URL is added here once it is live.
