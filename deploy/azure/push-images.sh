@@ -5,7 +5,7 @@
 set -euo pipefail
 root=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$root"
-# shellcheck disable=SC1090
+# shellcheck disable=SC1090,SC1091
 source "$HOME/.config/triaxis/ghcr.env"
 : "${GHCR_USER:?GHCR_USER missing}" "${GHCR_TOKEN:?GHCR_TOKEN missing}"
 tag=$(grep -m1 'newTag:' deploy/k8s/overlays/aks/kustomization.yaml | awk '{print $2}')
