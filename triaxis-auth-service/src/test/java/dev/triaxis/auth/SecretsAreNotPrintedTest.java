@@ -3,9 +3,11 @@ package dev.triaxis.auth;
 import java.time.Duration;
 import java.util.Set;
 
+import dev.triaxis.auth.domain.model.IssuedToken;
 import dev.triaxis.auth.domain.model.Role;
 import dev.triaxis.auth.domain.model.User;
 import dev.triaxis.auth.infrastructure.adapter.in.web.dto.TokenRequest;
+import dev.triaxis.auth.infrastructure.adapter.in.web.dto.TokenResponse;
 import dev.triaxis.auth.infrastructure.config.AuthProperties;
 import org.junit.jupiter.api.Test;
 
@@ -19,6 +21,12 @@ class SecretsAreNotPrintedTest {
 	@Test
 	void theTokenRequestHidesThePassword() {
 		assertThat(new TokenRequest("nurse", SECRET).toString()).doesNotContain(SECRET).contains("nurse");
+	}
+
+	@Test
+	void theIssuedTokenHidesTheBearerToken() {
+		assertThat(new IssuedToken(SECRET, 900).toString()).doesNotContain(SECRET).contains("accessToken=***");
+		assertThat(new TokenResponse(SECRET, "Bearer", 900).toString()).doesNotContain(SECRET).contains("Bearer");
 	}
 
 	@Test
