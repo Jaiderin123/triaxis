@@ -36,4 +36,21 @@ class ArchitectureTest {
 					"org.springframework..", "io.r2dbc..", "org.apache.kafka..", "com.fasterxml..")
 			.allowEmptyShould(true);
 
+	/** Time comes from the clock port (CLAUDE.md): the core never reads the system clock. */
+	@ArchTest
+	static final ArchRule coreNeverReadsTheSystemClock = noClasses()
+			.that().resideInAnyPackage("dev.triaxis.triage.domain..", "dev.triaxis.triage.application..")
+			.should().callMethod(java.time.Instant.class, "now")
+			.orShould().callMethod(java.time.OffsetDateTime.class, "now")
+			.orShould().callMethod(java.time.LocalDateTime.class, "now")
+			.orShould().callMethod(java.time.Clock.class, "systemUTC")
+			.allowEmptyShould(true);
+
+	/** Web adapters are functional endpoints (ADR 0012). */
+	@ArchTest
+	static final ArchRule noAnnotatedControllers = noClasses()
+			.should().beAnnotatedWith("org.springframework.web.bind.annotation.RestController")
+			.orShould().beAnnotatedWith("org.springframework.stereotype.Controller")
+			.allowEmptyShould(true);
+
 }
