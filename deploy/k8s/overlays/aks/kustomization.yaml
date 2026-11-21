@@ -11,13 +11,13 @@ resources:
 images:
   - name: triaxis-auth
     newName: ghcr.io/jaiderin123/triaxis-auth
-    newTag: 0.9.0
+    newTag: 0.9.1
   - name: triaxis-triage
     newName: ghcr.io/jaiderin123/triaxis-triage
-    newTag: 0.9.0
+    newTag: 0.9.1
   - name: triaxis-assistant
     newName: ghcr.io/jaiderin123/triaxis-assistant
-    newTag: 0.9.0
+    newTag: 0.9.1
 configMapGenerator:
   - name: aks-settings
     options:
