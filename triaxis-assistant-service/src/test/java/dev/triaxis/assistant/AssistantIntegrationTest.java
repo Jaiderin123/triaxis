@@ -19,7 +19,9 @@ import org.springframework.context.annotation.Import;
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.TYPE)
 @SpringBootTest(properties = {"spring.test.webtestclient.timeout=30s",
-		"triaxis.web.metrics.username=scraper", "triaxis.web.metrics.password=test-metrics-secret"})
+		"triaxis.web.metrics.username=scraper", "triaxis.web.metrics.password=test-metrics-secret",
+		// The tests ask many questions with a few users; QuestionRateLimitApiTest checks the limit itself.
+		"resilience4j.ratelimiter.configs.question.limit-for-period=100000"})
 @AutoConfigureWebTestClient
 @AutoConfigureObservability
 @Import({TestcontainersConfiguration.class, TestSecurityConfiguration.class})

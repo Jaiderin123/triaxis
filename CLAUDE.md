@@ -11,7 +11,7 @@ Triaxis is a reactive digital triage system with a clinical assistant. Nurses re
 | Phased checklist (what to do next) | `docs/PLAN.md` |
 | Assumptions and ambiguities | `docs/ASSUMPTIONS.md` |
 | Git and commit conventions | `docs/GIT_WORKFLOW.md` |
-| Decision records | `docs/adr/` (README, template and ADRs 0001 to 0024 exist; their status is in `ARCHITECTURE.md` section 14) |
+| Decision records | `docs/adr/` (README, template and ADRs 0001 to 0025 exist; their status is in `ARCHITECTURE.md` section 14) |
 | Original requirements (RF-xx, RN-xx), Spanish | `docs/private/ASSIGNMENT.md` (local only, git-ignored) |
 
 ## Modules
@@ -25,7 +25,7 @@ Triaxis is a reactive digital triage system with a clinical assistant. Nurses re
 | `triaxis-security` | n/a | Library: shared resource-server (JWT) configuration |
 | `triaxis-web` | n/a | Library: standard error responses, access log, protected metrics, tracing (no business logic) |
 
-All six modules exist on Spring Boot 3.5.16 and `./gradlew build` passes. Done and released to `main`: the auth service and shared security (phase 1), the triage core with the audit (phase 2), the events through a transactional outbox with an ordered relay to Kafka (phase 3), the platform foundation (standard errors, OpenTelemetry, JSON logs, protected metrics, hardening), the SLA escalation (phase 4), the assistant (phase 5: RAG with validated citations, the degraded mode, the urgency view from Kafka in Redis), the fixes of the review of 2026-11-19 (ADR 0022), the operation report (phase 6: one SQL query with window functions), and the alerts to the medical team (phase 7: a Kafka listener with a log or webhook channel, ADR 0011 and 0023). and the deployment (phase 8: the images, the one-command compose file, the Kubernetes manifests verified on kind, and Terraform for AKS; it runs at https://triaxis-demo.eastus2.cloudapp.azure.com, ADR 0010 and its revision). Phase 9 (the README, the final review and its fixes, version `0.9.0` deployed) is done; the status table and the resume notes are in `docs/PLAN.md`. 
+All six modules exist on Spring Boot 3.5.16 and `./gradlew build` passes. Done and released to `main`: the auth service and shared security (phase 1), the triage core with the audit (phase 2), the events through a transactional outbox with an ordered relay to Kafka (phase 3), the platform foundation (standard errors, OpenTelemetry, JSON logs, protected metrics, hardening), the SLA escalation (phase 4), the assistant (phase 5: RAG with validated citations, the degraded mode, the urgency view from Kafka in Redis), the fixes of the review of 2026-11-19 (ADR 0022), the operation report (phase 6: one SQL query with window functions), and the alerts to the medical team (phase 7: a Kafka listener with a log or webhook channel, ADR 0011 and 0023). and the deployment (phase 8: the images, the one-command compose file, the Kubernetes manifests verified on kind, and Terraform for AKS; it runs at https://triaxis-demo.eastus2.cloudapp.azure.com, ADR 0010 and its revision). Phase 9 (the README, the final review and its fixes) is done, and so are the limits and the prompt protection of the assistant (ADR 0025, version `0.9.1` deployed); the status table and the resume notes are in `docs/PLAN.md`. 
 
 ## Package layout (hexagonal, per service)
 
@@ -68,6 +68,7 @@ Assistant
 - When retrieval finds no relevant excerpt, answer with the fixed notice and do **not** call the LLM.
 - Sources in the response come from corpus metadata for validated ids, never from model free text. An invalid or unretrieved citation replaces the answer with the fixed notice.
 - Circuit breaker, timeout and fallback HTTP 503 on LLM calls (`ResilientLlmAdapter`, ADR 0004). The `mock` provider is the default; Gemini needs the `gemini` profile.
+- Limits and prompt protection (ADR 0025): at most 10 questions per minute per user (429), at most 4 calls to the provider in flight (503), the question isolated in its own tags, and every number of an answer written in a cited excerpt.
 
 Tests
 - BlockHound is installed when the test JVM of the assistant and of triage starts (`BlockHoundSessionListener`); never install it inside a test (it breaks the Reactor scheduler once other contexts run).

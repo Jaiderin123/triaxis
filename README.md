@@ -83,7 +83,7 @@ Versions and naming rules are in [docs/TECH_STACK.md](docs/TECH_STACK.md).
 | RF-05 operation report | `GET /triage/reportes/operacion`: one SQL query with window functions and `percentile_cont` |
 | RF-06 alerts | Kafka listener with a log or webhook channel (ADR 0011, ADR 0023) |
 | RN-04 audit | append-only `patient_audit`, protected by triggers, no delete endpoint (ADR 0014) |
-| RN-05 anti-hallucination | retrieval gate, constrained prompt and validated citations (ADR 0007) |
+| RN-05 anti-hallucination | retrieval gate, constrained prompt, validated citations (ADR 0007), the question isolated and every figure grounded in a cited excerpt (ADR 0025) |
 
 ## How to run
 
@@ -168,7 +168,7 @@ Everything is configured through environment variables; nothing secret is in the
 | assistant (8082) | `POST /asistente/consulta` with `{ "pregunta": "..." }` | `DOCTOR` |
 | assistant (8082) | `GET /asistente/estado-urgencias`: active patients per level, built only from the Kafka events | `NURSE`, `DOCTOR` |
 
-The assistant answers only from the clinical protocols, with the cited `fuentes` taken from the corpus. When no protocol applies it answers `No existe un protocolo disponible para esta pregunta.` with empty `fuentes`, and when the language model is unavailable it answers 503 (ADRs 0004 and 0007).
+The assistant answers only from the clinical protocols, with the cited `fuentes` taken from the corpus. When no protocol applies it answers `No existe un protocolo disponible para esta pregunta.` with empty `fuentes`, and when the language model is unavailable it answers 503 (ADRs 0004 and 0007). Each user may ask 10 questions per minute (then 429 with `Retry-After`); the question is isolated in the prompt, and an answer with a figure that is not in a cited excerpt is replaced by the notice (ADR 0025).
 
 ```bash
 TOKEN=$(curl -s -X POST localhost:8083/auth/token -H 'Content-Type: application/json' \
@@ -183,7 +183,7 @@ The alerts add no endpoint: they are sent from Kafka events. Assumptions and amb
 
 ## Decisions
 
-The 24 decision records are in [docs/adr/](docs/adr/) (index in its README). The key ones:
+The 25 decision records are in [docs/adr/](docs/adr/) (index in its README). The key ones:
 
 | Decision | Why |
 |---|---|
@@ -193,6 +193,7 @@ The 24 decision records are in [docs/adr/](docs/adr/) (index in its README). The
 | Spring Kafka instead of Reactor Kafka ([0001](docs/adr/0001-spring-kafka-instead-of-reactor-kafka.md)) | Maintained, with acknowledgment after handling; the reactive code bridges with bounded concurrency |
 | Vectors in pgvector through R2DBC ([0002](docs/adr/0002-vectors-over-r2dbc.md)) | No blocking JDBC driver and no extra database; the corpus lives next to the data it describes |
 | Anti-hallucination in layers ([0007](docs/adr/0007-anti-hallucination.md)) | The gate, the prompt and the citation check each stop invented content alone |
+| Limits and prompt protection of the assistant ([0025](docs/adr/0025-limits-and-prompt-protection-of-the-assistant.md)) | One user cannot spend the quota of Gemini, a forged excerpt is never seen as one, and an invented figure never reaches a doctor |
 | Degraded mode ([0004](docs/adr/0004-degraded-mode.md)) | A failing LLM gives a clear 503 quickly instead of hanging; the rest keeps working |
 | Gemini with a `mock` provider ([0008](docs/adr/0008-gemini-and-mock-provider.md)) | Real RAG in Azure; tests and local runs need no key and are deterministic |
 | Own identity service with RS256 and JWKS ([0003](docs/adr/0003-identity-service-rs256-jwks.md)) | The business services only validate tokens; a managed provider could replace it |
@@ -207,12 +208,12 @@ Every ambiguity of the specification is resolved in [docs/ASSUMPTIONS.md](docs/A
 ./gradlew build      # compiles and runs every test of the six modules; needs JDK 21 and Docker (Testcontainers)
 ```
 
-Result of the last run (verified): **533 tests, all passing.**
+Result of the last run (verified): **540 tests, all passing.**
 
 | Module | Tests | Line coverage | Branch coverage |
 |---|---|---|---|
 | triage-service | 310 | 94 % | 75 % |
-| assistant-service | 131 | 95 % | 83 % |
+| assistant-service | 138 | 95 % | 84 % |
 | auth-service | 35 | 97 % | 84 % |
 | security (library) | 26 | 95 % | 79 % |
 | web (library) | 22 | 94 % | 77 % |

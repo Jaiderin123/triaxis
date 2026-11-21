@@ -5,6 +5,7 @@ import java.util.List;
 import dev.triaxis.assistant.domain.exception.AssistantUnavailableException;
 import dev.triaxis.assistant.domain.exception.InvalidQuestionException;
 import dev.triaxis.assistant.domain.exception.UrgencyViewUnavailableException;
+import dev.triaxis.assistant.infrastructure.adapter.in.web.ratelimit.TooManyQuestionsException;
 import dev.triaxis.assistant.infrastructure.adapter.in.web.validation.InvalidRequestException;
 import dev.triaxis.assistant.infrastructure.config.LlmProperties;
 import dev.triaxis.web.problem.AbstractProblemExceptionHandler;
@@ -50,6 +51,9 @@ class GlobalErrorHandler extends AbstractProblemExceptionHandler {
 			log.warn("Question answered with 503: {}", unavailable.getMessage());
 			return Problems.of(HttpStatus.SERVICE_UNAVAILABLE, UNAVAILABLE);
 		}
+		if (error instanceof TooManyQuestionsException tooMany) {
+			return Problems.of(HttpStatus.TOO_MANY_REQUESTS, tooMany.getMessage());
+		}
 		if (error instanceof UrgencyViewUnavailableException unavailable) {
 			log.warn("Urgency view answered with 503: {}", unavailable.getCause().getClass().getSimpleName());
 			return Problems.of(HttpStatus.SERVICE_UNAVAILABLE, unavailable.getMessage());
@@ -59,6 +63,9 @@ class GlobalErrorHandler extends AbstractProblemExceptionHandler {
 
 	@Override
 	protected void addHeaders(Throwable error, HttpHeaders headers) {
+		if (error instanceof TooManyQuestionsException tooMany) {
+			headers.set(HttpHeaders.RETRY_AFTER, String.valueOf(tooMany.retryAfter().toSeconds()));
+		}
 		if (error instanceof AssistantUnavailableException || error instanceof UrgencyViewUnavailableException) {
 			headers.set(HttpHeaders.RETRY_AFTER, String.valueOf(retryAfterSeconds));
 		}
