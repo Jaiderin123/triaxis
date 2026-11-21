@@ -8,6 +8,7 @@ import java.util.Map;
 
 import dev.triaxis.assistant.application.port.out.ClockPort;
 import dev.triaxis.assistant.application.port.out.UrgencyViewStore;
+import dev.triaxis.assistant.domain.exception.UrgencyViewUnavailableException;
 import dev.triaxis.assistant.domain.model.TriageLevel;
 import dev.triaxis.assistant.domain.model.UrgencyEvent;
 import dev.triaxis.assistant.domain.model.UrgencyView;
@@ -82,7 +83,8 @@ class RedisUrgencyViewStore implements UrgencyViewStore {
 				.map(millis -> Instant.ofEpochMilli(Long.parseLong(millis)));
 		return counts.zipWith(newest.map(java.util.Optional::of).defaultIfEmpty(java.util.Optional.empty()))
 				.map(tuple -> new UrgencyView(tuple.getT1(), tuple.getT2().orElse(null)))
-				.timeout(timeout);
+				.timeout(timeout)
+				.onErrorMap(error -> !(error instanceof UrgencyViewUnavailableException), UrgencyViewUnavailableException::new);
 	}
 
 	@Override

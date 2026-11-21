@@ -14,6 +14,7 @@ import dev.triaxis.assistant.infrastructure.adapter.out.llm.mock.MockLlmAdapter;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.micrometer.core.instrument.MeterRegistry;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient;
@@ -88,6 +89,12 @@ class DegradedModeApiTest {
 				.bodyValue(Map.of("pregunta", question)).exchange();
 	}
 
+	/** Both tests share the breaker of the context: each one starts with it closed, whatever the order. */
+	@BeforeEach
+	void closeTheBreaker() {
+		breakers.circuitBreaker("llm").reset();
+	}
+
 	@Test
 	void anUnavailableProviderGivesA503AndTheBreakerStopsCallingIt() throws InterruptedException {
 		for (int i = 0; i < 400 && !corpus.isReady(); i++) {
@@ -112,7 +119,7 @@ class DegradedModeApiTest {
 	}
 
 	@Test
-	void aQuestionWithoutProtocolStillGetsTheNoticeWithoutTheProvider() throws InterruptedException {
+	void aQuestionWithoutProtocolGetsTheNoticeWithoutCallingTheChatModel() throws InterruptedException {
 		for (int i = 0; i < 400 && !corpus.isReady(); i++) {
 			Thread.sleep(50);
 		}
