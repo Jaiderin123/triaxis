@@ -28,4 +28,4 @@ The requirements specification asks for authentication, input validation and no 
 
 - Tokens are bound to this system; changing the audience needs a coordinated change of the auth service and the resource servers.
 - Brute force is slowed down but not stopped; account lockout and an identity provider with its own protections are the production answer.
-- TLS termination, non-root containers and network policies are deployment tasks (ADR 0010).
+- TLS termination, non-root containers and network policies are deployment tasks (ADR 0010). TLS and the non-root containers are in place; the network policies are deferred (PLAN "Improvements", ASSUMPTIONS A47).

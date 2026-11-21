@@ -31,7 +31,7 @@ Each patient has a small state in Redis and a Lua script applies every event to 
 - "Discharged" is a final state: no later event brings the patient back. This matches the triage state machine, where `ALTA` has no outgoing transition.
 - The discharged marker expires after `assistant.urgency.discharged-ttl` (30 days by default), which must be longer than the topic retention (7 days), so a replay can never meet a registration whose discharge marker is already gone.
 - The script also keeps the time of the newest applied event (`actualizadoEn` in the response).
-- Offsets are committed only after the script succeeds. When the view metadata key is missing at startup (new or lost Redis), the consumer reads the topic again from the beginning, and the same rules rebuild the counts.
+- Offsets are committed only after the script succeeds. When the view metadata key is missing at startup (new or lost Redis), the consumer reads the topic again from the beginning, and the same rules rebuild the counts. (The review of 2026-11-19, ADR 0022, moved the marker to its own key, `urgency:initialized`, written only by the reset before a replay.)
 
 ## Alternatives considered
 
