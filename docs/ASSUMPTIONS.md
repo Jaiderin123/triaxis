@@ -25,7 +25,7 @@ A1 to A4 come from `ARCHITECTURE.md` section 6.2. A5 onward were added while pre
 - **Ambiguity:** the specification says the complaint "belongs to the list" without defining matching.
 - **Decision:** normalized exact equality (lowercase, accents removed, trimmed, and runs of inner spaces reduced to one). The list is configurable (`triage.administrative-complaints`). Matching is not "contains".
 - **Why:** a clinical complaint that merely mentions "seguimiento" must not be downgraded to level 5.
-- **Impact if wrong:** a free-text complaint such as "renovacion de recetario cronico" would stay at level 4 instead of 5. Safe direction (higher priority), tracked as open decision 4 in `ARCHITECTURE.md`.
+- **Impact if wrong:** a free-text complaint such as "renovacion de recetario cronico" would stay at level 4 instead of 5. Safe direction (higher priority), recorded as decision 4 of `ARCHITECTURE.md` section 13.
 
 ## A4. Validation ranges
 

@@ -752,11 +752,11 @@ Minimum coverage required: classification E1 to E6, valid and invalid transition
 
 ---
 
-## 13. Open decisions
+## 13. Decisions that were open during the planning
 
 | # | Decision | Current proposal | Alternative |
 |---|---|---|---|
-| 1 | Where and how alerts are sent (RF-06) | Kafka-driven notifier inside `triage-service`, webhook plus log adapter | Dedicated `notification-service`, email, SSE |
+| 1 | Where and how alerts are sent (RF-06) | **Decided:** a Kafka listener inside `triage-service` with a log or webhook channel, one alert per escalation and only while the patient waits (ADR 0011, ADR 0023) | Dedicated `notification-service`, email, SSE |
 | 2 | Event publication | **Decided:** transactional outbox (ADR 0005) | Publish after commit with retry (faster to build) |
 | 3 | Azure compute | **Decided:** AKS with one node and in-cluster PostgreSQL, Kafka and Redis (ADR 0010) | Azure Container Apps, managed services |
 | 4 | Level 5 complaint matching | **Decided:** normalized exact match (ASSUMPTIONS A3) | Contains match |
