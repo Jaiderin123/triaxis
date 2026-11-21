@@ -26,7 +26,8 @@ class R2dbcPatientRepository implements PatientRepository {
 			UPDATE patients
 			SET status = :next,
 			    status_changed_at = :now,
-			    consultation_started_at = CASE WHEN :next = 'IN_CONSULTATION' THEN :now ELSE consultation_started_at END
+			    consultation_started_at = CASE WHEN :next = 'IN_CONSULTATION' THEN GREATEST(:now, registered_at)
+			                                   ELSE consultation_started_at END
 			WHERE id = :id AND status = :expected
 			RETURNING *
 			""";

@@ -5,7 +5,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
 
-/** Role rules of the triage endpoints (see ADR 0013); everything else just needs a valid token. */
+/** Role rules of the triage endpoints (see ADR 0013); any other route is denied (deny by default, ADR 0022). */
 @Configuration
 class SecurityRulesConfiguration {
 

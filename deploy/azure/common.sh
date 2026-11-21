@@ -11,7 +11,7 @@ use_cluster() {
   kubectl config use-context "$CLUSTER" >/dev/null
 }
 
-# Asks before an action that creates, starts or deletes billed resources; --yes skips the question.
+# Asks before an action that creates or deletes billed resources (deploy.sh, destroy.sh); --yes skips the question.
 confirm() {
   [ "${ASSUME_YES:-}" = "true" ] && return 0
   if [ ! -t 0 ]; then

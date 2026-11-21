@@ -17,7 +17,10 @@ deploy/azure/push-images.sh
 owner=$(sed -n 's/^GHCR_USER=//p' "$HOME/.config/triaxis/ghcr.env" | tr '[:upper:]' '[:lower:]')
 tag=$(grep -m1 'newTag:' deploy/k8s/overlays/aks/kustomization.yaml | awk '{print $2}')
 for service in auth triage assistant; do
-  token=$(curl -fsS "https://ghcr.io/token?scope=repository:$owner/triaxis-$service:pull" | jq -r '.token // empty')
+  if ! token=$(curl -fsS "https://ghcr.io/token?scope=repository:$owner/triaxis-$service:pull" | jq -r '.token // empty'); then
+    echo "cannot reach ghcr.io to check ghcr.io/$owner/triaxis-$service:$tag" >&2
+    exit 1
+  fi
   if ! curl -fsS -o /dev/null -H "Authorization: Bearer $token" \
       -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
       "https://ghcr.io/v2/$owner/triaxis-$service/manifests/$tag"; then
@@ -31,6 +34,7 @@ terraform init -input=false >/dev/null
 terraform plan -input=false -out=triaxis.tfplan
 confirm "Apply this plan (it creates billed resources)?"
 terraform apply -input=false triaxis.tfplan
+rm -f triaxis.tfplan
 fqdn=$(terraform output -raw fqdn)
 cd "$root"
 

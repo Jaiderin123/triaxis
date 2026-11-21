@@ -4,13 +4,86 @@ Reactive digital triage system with a clinical assistant, built with Spring Boot
 
 > **Resumen:** Triaxis es un sistema de triaje digital con un asistente clínico, compuesto por servicios de triaje, asistente y autenticación, desarrollados con Spring Boot reactivo, Kafka, PostgreSQL y Redis.
 
+**Deployed on Azure:** https://triaxis-demo.eastus2.cloudapp.azure.com (see [Deployment](#deployment); the credentials of the deployed users are handed over separately).
+
 ## Architecture
 
-_TODO_
+Three reactive Spring Boot services in a hexagonal layout (ADR 0016), connected only through Kafka and JWT:
+
+```mermaid
+flowchart LR
+    client([API client])
+    ingress[Traefik ingress<br/>HTTPS, Let's Encrypt]
+
+    subgraph Triaxis
+        auth[auth-service<br/>JWT RS256 + JWKS]
+        triage[triage-service<br/>classification, states, SLA,<br/>audit, report, alerts]
+        assistant[assistant-service<br/>RAG + urgency view]
+    end
+
+    pgT[(PostgreSQL<br/>triage)]
+    pgA[(PostgreSQL + pgvector<br/>assistant)]
+    kafka{{Kafka<br/>triaje.eventos}}
+    redis[(Redis<br/>urgency view)]
+    llm[[Gemini<br/>chat + embeddings]]
+    team[[Medical team<br/>log or webhook]]
+
+    client --> ingress
+    ingress -->|/auth| auth
+    ingress -->|/triage| triage
+    ingress -->|/asistente| assistant
+
+    triage --> pgT
+    triage -->|transactional outbox| kafka
+    kafka -->|paciente_escalado| triage
+    triage -->|one alert per escalation| team
+
+    kafka -->|all events| assistant
+    assistant --> redis
+    assistant --> pgA
+    assistant -->|circuit breaker, timeout| llm
+
+    triage -. JWKS .-> auth
+    assistant -. JWKS .-> auth
+```
+
+- **triage-service** registers and classifies patients (RN-01), runs the state flow (RF-02), escalates overdue patients with one atomic SQL statement (RF-03, RN-03, ADR 0006) and writes the audit trail (RN-04). The patient row, its audit entry and its event are written in one transaction, and a relay publishes the events to Kafka in order (transactional outbox, ADR 0005). A Kafka listener sends the alerts of RF-06.
+- **assistant-service** answers questions with RAG over the protocols (pgvector through R2DBC) and validates every citation (RF-04, RN-05, ADR 0007). It builds the urgency view in Redis only from the Kafka events, never by calling triage.
+- **auth-service** issues RS256 tokens and publishes the JWKS. It is a third service so the two business services only validate tokens (ADR 0003).
+- **Triage never depends on the assistant**, and the urgency view keeps working when Gemini is down. Each service owns its database.
+- **Inside each service:** `domain` (rules, JDK only), `application` (use cases and ports) and `infrastructure` (web, persistence, Kafka, LLM and Redis adapters). ArchUnit tests enforce the direction of the dependencies.
+
+The full design is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (data model, SQL, event contract, configuration and security).
 
 ## Tech stack
 
-See [docs/TECH_STACK.md](docs/TECH_STACK.md).
+| Area | Choice |
+|---|---|
+| Language and framework | Java 21, Spring Boot 3.5.16, Spring WebFlux with Project Reactor |
+| Persistence | R2DBC with PostgreSQL 16; pgvector 0.8.7 for the protocol embeddings |
+| Messaging | Apache Kafka 3.9.1 (KRaft) with Spring Kafka; JSON events with a version field |
+| Read model | Redis 7.4 for the urgency view |
+| AI | Spring AI 1.1.8 with Gemini (`gemini-2.5-flash`, `gemini-embedding-001`); a deterministic `mock` provider for local runs and tests |
+| Resilience | Resilience4j 2.4.0: a circuit breaker, a timeout and the 503 fallback on the LLM |
+| Security | JWT RS256 with JWKS, Spring Security resource servers, BCrypt |
+| Observability | Micrometer with Prometheus, OpenTelemetry traces, ECS JSON logs |
+| Tests | JUnit 5, Testcontainers (PostgreSQL, Kafka, Redis), BlockHound, ArchUnit, JaCoCo |
+| Deployment | Docker, Kubernetes with Kustomize, Traefik 3.7, Terraform (azurerm 4.81) on AKS |
+
+Versions and naming rules are in [docs/TECH_STACK.md](docs/TECH_STACK.md).
+
+## Requirements map
+
+| Requirement | Where |
+|---|---|
+| RF-01 registration and classification | `POST /triage/pacientes`; `TriageClassifier` (domain), validation in the domain (ADR 0017) |
+| RF-02 state flow | `PATCH /triage/pacientes/{id}/estado` with a conditional `UPDATE`; `GET /triage/pacientes/{id}` |
+| RF-03 SLA and escalation | `EscalationScheduler`; interval and SLA in `triage.escalation.*` and `triage.sla.minutes.*` |
+| RF-04 assistant | `POST /asistente/consulta` (RAG, citations); `GET /asistente/estado-urgencias` (Kafka to Redis) |
+| RF-05 operation report | `GET /triage/reportes/operacion`: one SQL query with window functions and `percentile_cont` |
+| RF-06 alerts | Kafka listener with a log or webhook channel (ADR 0011, ADR 0023) |
+| RN-04 audit | append-only `patient_audit`, protected by triggers, no delete endpoint (ADR 0014) |
+| RN-05 anti-hallucination | retrieval gate, constrained prompt and validated citations (ADR 0007) |
 
 ## How to run
 
@@ -110,11 +183,51 @@ The alerts add no endpoint: they are sent from Kafka events. Assumptions and amb
 
 ## Decisions
 
-Architecture decisions are recorded in [docs/adr/](docs/adr/).
+The 24 decision records are in [docs/adr/](docs/adr/) (index in its README). The key ones:
+
+| Decision | Why |
+|---|---|
+| Hexagonal architecture per service ([0016](docs/adr/0016-hexagonal-architecture.md)) | The clinical rules stay pure and testable without Spring; adapters can change without touching them |
+| Transactional outbox ([0005](docs/adr/0005-transactional-outbox.md)) | A patient change and its event are never out of sync, even if Kafka is down |
+| Atomic escalation with `FOR UPDATE SKIP LOCKED` ([0006](docs/adr/0006-atomic-escalation.md)) | Escalation is idempotent (RN-03) and safe with several replicas, in one statement |
+| Spring Kafka instead of Reactor Kafka ([0001](docs/adr/0001-spring-kafka-instead-of-reactor-kafka.md)) | Maintained, with acknowledgment after handling; the reactive code bridges with bounded concurrency |
+| Vectors in pgvector through R2DBC ([0002](docs/adr/0002-vectors-over-r2dbc.md)) | No blocking JDBC driver and no extra database; the corpus lives next to the data it describes |
+| Anti-hallucination in layers ([0007](docs/adr/0007-anti-hallucination.md)) | The gate, the prompt and the citation check each stop invented content alone |
+| Degraded mode ([0004](docs/adr/0004-degraded-mode.md)) | A failing LLM gives a clear 503 quickly instead of hanging; the rest keeps working |
+| Gemini with a `mock` provider ([0008](docs/adr/0008-gemini-and-mock-provider.md)) | Real RAG in Azure; tests and local runs need no key and are deterministic |
+| Own identity service with RS256 and JWKS ([0003](docs/adr/0003-identity-service-rs256-jwks.md)) | The business services only validate tokens; a managed provider could replace it |
+| Alerts from Kafka, only while the patient waits ([0011](docs/adr/0011-alert-channel.md), [0023](docs/adr/0023-alerts-only-for-waiting-patients.md)) | The open RF-06: one alert per escalation, never from the escalation transaction, without clinical data |
+| AKS with one node and Terraform ([0010](docs/adr/0010-deployment-on-aks.md)) | Kubernetes manifests as asked, with the state in the cluster to keep the cost of a demonstration low |
+
+Every ambiguity of the specification is resolved in [docs/ASSUMPTIONS.md](docs/ASSUMPTIONS.md) with its decision, the reason and the impact if it were wrong (for example integer vital signs, the exact match of administrative complaints, the meaning of "exceeded the SLA" and the waiting time of a patient discharged directly).
 
 ## Testing
 
-_TODO_
+```bash
+./gradlew build      # compiles and runs every test of the six modules; needs JDK 21 and Docker (Testcontainers)
+```
+
+Result of the last run (verified): **533 tests, all passing.**
+
+| Module | Tests | Line coverage | Branch coverage |
+|---|---|---|---|
+| triage-service | 310 | 94 % | 75 % |
+| assistant-service | 131 | 95 % | 83 % |
+| auth-service | 35 | 97 % | 84 % |
+| security (library) | 26 | 95 % | 79 % |
+| web (library) | 22 | 94 % | 77 % |
+| common (event contract) | 9 | n/a (records only) | n/a |
+
+What the tests cover, as the specification asks:
+
+- **Classification:** the reference patients E1 to E6, the limits of every level and the administrative complaints (domain unit tests, and the API with the same cases).
+- **State flow:** every valid and invalid transition, 404 and 409, and two concurrent changes of the same patient (one wins).
+- **Escalation:** idempotency (a second run does nothing), patients in consultation or discharged are never escalated, the event and the audit entry, and several schedulers in parallel.
+- **RAG:** the three sample questions with their citations, the "no match without hallucination" case (the LLM is not called), invalid or unretrieved citations rejected, and the 503 of the degraded mode.
+- **Integration:** PostgreSQL, Kafka and Redis in Testcontainers (the outbox relay, the urgency view from real events, the report SQL, the alert listener). The LLM is always the mock or a stub, never a real call.
+- **Guards:** BlockHound fails any blocking call on a reactive thread; ArchUnit checks the layers; a route test checks that every endpoint has its role rule.
+
+Coverage reports (JaCoCo) are written to `<module>/build/reports/jacoco/test/html/index.html`.
 
 ## Deployment
 
@@ -142,7 +255,7 @@ deploy/azure/stop.sh       # stop the node between demonstrations; start.sh star
 deploy/azure/destroy.sh    # delete everything (asks first; --yes skips the question, also for deploy.sh)
 ```
 
-The scripts read local files outside the repository: `~/.config/triaxis/ghcr.env` (a GitHub token that can publish packages), `deploy.env` (the passwords of the deployed users) and `gemini.env`. The deployed URL is added here once it is live.
+The scripts read local files outside the repository: `~/.config/triaxis/ghcr.env` (a GitHub token that can publish packages), `deploy.env` (the passwords of the deployed users) and `gemini.env`.
 
 ## Author
 

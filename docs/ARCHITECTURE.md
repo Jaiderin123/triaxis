@@ -264,7 +264,8 @@ The change is a conditional update, so concurrent requests cannot both succeed:
 UPDATE patients
 SET status = :new,
     status_changed_at = :now,
-    consultation_started_at = CASE WHEN :new = 'IN_CONSULTATION' THEN :now ELSE consultation_started_at END
+    consultation_started_at = CASE WHEN :new = 'IN_CONSULTATION' THEN GREATEST(:now, registered_at)
+                                   ELSE consultation_started_at END
 WHERE id = :id AND status = :expected
 RETURNING *;
 ```
@@ -458,7 +459,7 @@ Assumptions: waiting time is registration to the first (and only) transition int
 - Delivery (A45): up to 3 attempts in total (waits of 1 s and then 2 s between them), then counted as failed and the next event goes on; a table `alert_deliveries (event_id PRIMARY KEY, patient_id, outcome, handled_at)` records every handled event, and an event already recorded is not sent again.
 - Only a patient that still waits is alerted (ADR 0023): when the event is handled after the patient entered consultation or was discharged (a late event, or the replay of the retained topic by a group that starts for the first time), nothing is sent and the event is recorded as `SKIPPED`.
 - Metric `triage.alerts` by outcome (`sent`, `failed`, `skipped`, `duplicate`) and `triage.alerts.invalid` for skipped records. The payload, the webhook URL (a secret) and the patient data are never logged: a channel error only names its cause (the HTTP status, a timeout or the exception type), and the log channel writes only the minimal content of A44 as key-value pairs of the JSON line (`alert.*`).
-- Handling: at most 16 events in flight; each one is bounded by a timeout derived from the settings (every attempt at its longest, the waits between them, and 30 s for the two statements). A failing channel is an outcome, not an error; an error (the database does not answer) is retried with back-off until it works, and the record is not acknowledged meanwhile.
+- Handling: at most 16 events in flight; each one is bounded by a timeout derived from the settings (every attempt at its longest, the waits between them, and 30 s for the three statements). A failing channel is an outcome, not an error; an error (the database does not answer) is retried with back-off until it works, and the record is not acknowledged meanwhile.
 - The use case is `NotifyEscalationService` (application); the adapters are in `infrastructure.adapter.out.alert`, the store is `R2dbcAlertDeliveryStore` and the listener is `EscalationAlertListener` (`infrastructure.adapter.in.messaging`). Triage runs the listener as a single consumer group; with several replicas the partitions are shared and `alert_deliveries` keeps one alert per event (a rebalance in the middle of a send can still repeat one, A45).
 
 Example of the webhook body:
@@ -593,7 +594,7 @@ The assistant **never calls the triage API**. A consumer in its own group (`assi
 
 - Discharged is final; its key expires after `assistant.urgency.discharged-ttl` (30 days, longer than the topic retention), so a replay never counts a discharged patient again.
 - The listener (`UrgencyViewListener`) is asynchronous, as ADR 0001 says: it returns a `Mono` and acknowledges a record only after the script succeeded, so offsets are committed only for applied events. Records may be applied out of order, which the rules allow. At most `assistant.urgency.max-in-flight` (64) records are in flight; a Redis failure is retried with back-off until it works; a record that is not a valid event is logged (without its payload), counted and skipped (ASSUMPTIONS A38).
-- If Redis is lost (no `urgency:meta` key), the consumer reads the topic again from the earliest offset when its partitions are assigned, at startup or after a restart, before it processes any record, and the same rules rebuild the counts. The view is not rebuilt while the consumer runs: with asynchronous acknowledgments a seek does not replay the records.
+- If Redis is lost (no `urgency:initialized` key, see below), the consumer reads the topic again from the earliest offset when its partitions are assigned, at startup or after a restart, before it processes any record, and the same rules rebuild the counts. The view is not rebuilt while the consumer runs: with asynchronous acknowledgments a seek does not replay the records.
 - The Lua script is read once at startup (`redis/urgency-apply.lua`); a script built from a resource reads the file again on a Redis I/O thread, which BlockHound reported.
 - A built view is marked by its own key, `urgency:initialized`, written only by the reset before a replay (the script writes `urgency:meta` with every event, so that key cannot mark it). When Redis does not answer at partition assignment, the consumer waits there with back-off (`assistant.urgency.startup-check.backoff`, `max-backoff`) and consumes nothing until Redis answers; a wait longer than `max.poll.interval.ms` makes Kafka rebalance and the check start again.
 - The assistant runs as a single replica, because the rebuild is not coordinated across consumers (ASSUMPTIONS A39). A negative or unknown count is never returned: it is read as zero or ignored, logged and counted.
@@ -616,7 +617,7 @@ The assistant **never calls the triage API**. A consumer in its own group (`assi
 | Method and path | Role | Success | Errors |
 |---|---|---|---|
 | `POST /asistente/consulta` body `{ "pregunta": "..." }` | DOCTOR | 200 `{ "respuesta": "...", "fuentes": [ { "protocolo": "PROTO-001", "seccion": "..." } ] }`. If no protocol applies: 200 with `respuesta` = "No existe un protocolo disponible para esta pregunta." and `fuentes: []` | 400 (blank question or longer than 1000 characters), 401, 403, 503 (LLM unavailable) |
-| `GET /asistente/estado-urgencias` | NURSE, DOCTOR | 200 `{ "porNivel": {...five levels...}, "total": n, "actualizadoEn": "..." }` (section 7.5) | 401, 403 |
+| `GET /asistente/estado-urgencias` | NURSE, DOCTOR | 200 `{ "porNivel": {...five levels...}, "total": n, "actualizadoEn": "..." }` (section 7.5) | 401, 403, 503 with `Retry-After` when Redis does not answer |
 
 `seccion` is the section title as written in the corpus (for example `Medidas iniciales`). Errors use the shared RFC 7807 format (section 10).
 
@@ -680,7 +681,7 @@ Event types: `paciente_registrado`, `paciente_en_consulta`, `paciente_alta`, `pa
 | `triage.sla.minutes.*` | triage | SLA per level |
 | `triage.escalation.enabled`, `triage.escalation.interval`, `triage.escalation.batch-size`, `triage.escalation.batch-timeout` | triage | Escalation loop (defaults `true`, `PT30S`, `100`, `PT60S`), validated at startup |
 | `triage.administrative-complaints` | triage | Level 5 complaint list |
-| `triage.report.max-range` | triage | Longest range of the operation report (default `P31D`, phase 6) |
+| `triage.report.max-range`, `triage.report.timeout` | triage | Longest range of the operation report (default `P31D`, phase 6) and the timeout of its query (default `PT15S`, longer than `statement_timeout`) |
 | `triage.alerts.channel` (`log` or `webhook`), `ALERT_WEBHOOK_URL` (`triage.alerts.webhook.url`), `triage.alerts.webhook.connect-timeout`, `response-timeout`, `triage.alerts.attempts`, `triage.alerts.backoff` | triage | Alerts of escalated patients (defaults `log`, 2 s, 5 s, 3 attempts in total, 1 s doubling). Validated by `AlertProperties` at startup: attempts at least 1, positive durations, and with `webhook` an absolute http or https URL; the URL is never printed |
 | `spring.kafka.consumer.*` (triage) | triage | Consumer of the alert listener: no auto commit, string deserializers, 50 records per poll, `request.timeout.ms` 10 s and `default.api.timeout.ms` 15 s; the group and `auto.offset.reset` are set on the listener |
 | `triage.outbox.relay.*` (including `send-timeout` 15 s, `cycle-budget` 30 s and `cycle-timeout` 60 s, validated so that the timeout exceeds budget plus send), `triage.outbox.topic.*` | triage | Relay loop and topic creation |
@@ -697,8 +698,8 @@ Event types: `paciente_registrado`, `paciente_en_consulta`, `paciente_alta`, `pa
 | `TRACING_EXPORT_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `TRACING_SAMPLING_PROBABILITY` | all | OpenTelemetry export |
 | `assistant.rag.top-k`, `assistant.rag.max-distance` | assistant | Retrieval tuning (phase 5) |
 | `assistant.llm.provider` (`mock` by default), profile `gemini`, `GEMINI_API_KEY`, `GEMINI_CHAT_MODEL`, `GEMINI_EMBEDDING_MODEL` | assistant | LLM selection, models and key (key from the environment only); without the `gemini` profile the Gemini auto-configuration is off (ADR 0008) |
-| `assistant.rag.question-max-length`, `assistant.rag.search-timeout`, `assistant.corpus.location`, `assistant.corpus.retry.*` | assistant | Question limit (1000), similarity search timeout (3 s), protocol folder, back-off of the corpus embedding |
-| `assistant.llm.timeout.*`, `resilience4j.circuitbreaker.instances.llm.*` | assistant | Timeouts (embedding 5 s, answer 20 s, `Retry-After` 30 s) and circuit breaker of the LLM calls (ADR 0004) |
+| `assistant.rag.question-max-length`, `assistant.rag.search-timeout`, `assistant.corpus.location`, `assistant.corpus.retry.*` | assistant | Question limit (1000), similarity search timeout (3 s), protocol folder, back-off of the corpus embedding (positive, the maximum not shorter than the initial one) |
+| `assistant.llm.timeout.*`, `resilience4j.circuitbreaker.instances.llm.*` | assistant | Timeouts (embedding 5 s, answer 20 s, `Retry-After` 30 s; positive durations, validated at startup) and circuit breaker of the LLM calls (ADR 0004) |
 | `ASSISTANT_DB_URL`, `ASSISTANT_DB_USER`, `ASSISTANT_DB_PASSWORD` | assistant | PostgreSQL with pgvector (R2DBC) |
 | `REDIS_PASSWORD` (compose) / `SPRING_DATA_REDIS_PASSWORD` (assistant) | compose, assistant | Password of Redis; compose default `triaxis-local` (also in the `local` profile of the assistant), generated in Kubernetes |
 | `ASSISTANT_PROFILES` | compose, Kubernetes ConfigMap | Spring profiles of the assistant: empty (`mock`) by default, `gemini` in the `aks` overlay (A16) |
@@ -740,7 +741,7 @@ Minimum coverage required: classification E1 to E6, valid and invalid transition
 - AKS with the free tier of the control plane and one `Standard_D2as_v7` node (2 vCPU, 8 GiB, AMD, not burstable) in `eastus2`, created by Terraform (`deploy/azure/terraform`) with the static public IP of the ingress and an optional budget.
 - PostgreSQL, Kafka and Redis run in the cluster as single-replica StatefulSets with persistent volumes; one replica of each service (the assistant must run as one, A39).
 - `deploy/k8s/` is a Kustomize base with the overlays `kind` and `aks` (`kubectl apply -k`).
-- Public images on GitHub Container Registry, built by one multi-stage Dockerfile (`docker/service.Dockerfile`, JDK 21 to build, JRE 21 to run, exact tags, uid 10001); the pods run without root, with a read-only file system and no capabilities.
+- Public images on GitHub Container Registry, built by one multi-stage Dockerfile (`docker/service.Dockerfile`, JDK 21 to build, JRE 21 to run, exact tags, uid 10001); the pods of the services run without root, with a read-only file system and no capabilities; PostgreSQL and Redis start as root and drop to their own user (their images need it), and all the pods use the seccomp profile of the runtime, no privilege escalation and no service account token. Traefik watches only the namespace `triaxis`.
 - Traefik `v3.7.19`, installed by the base, with the standard `Ingress` resource and paths `/auth`, `/.well-known/jwks.json`, `/triage` and `/asistente`; on AKS the Azure DNS label is the host and Traefik gets the Let's Encrypt certificate itself (HTTP-01) and redirects HTTP to HTTPS. `/actuator` is not routed.
 - The assistant uses Gemini with `GEMINI_API_KEY` from a Secret (A16); alerts use the log channel (ADR 0011).
 - The Secret `triaxis-secrets` is created by `deploy/scripts/create-secrets.sh` (generated passwords and signing key, BCrypt hashes of the users, the Gemini key from a local file); an existing Secret is kept. `deploy/azure/deploy.sh`, `stop.sh`, `start.sh` and `destroy.sh` wrap Terraform and `kubectl`.

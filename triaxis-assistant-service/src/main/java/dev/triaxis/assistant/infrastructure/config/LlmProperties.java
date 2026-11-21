@@ -22,6 +22,19 @@ public record LlmProperties(@DefaultValue("mock") String provider, @DefaultValue
 	 */
 	public record Timeout(@DefaultValue("PT5S") Duration embedding, @DefaultValue("PT20S") Duration answer,
 			@DefaultValue("PT30S") Duration retryAfter) {
+
+		public Timeout {
+			requirePositive("assistant.llm.timeout.embedding", embedding);
+			requirePositive("assistant.llm.timeout.answer", answer);
+			requirePositive("assistant.llm.timeout.retry-after", retryAfter);
+		}
+
+	}
+
+	static void requirePositive(String name, Duration value) {
+		if (value == null || value.isZero() || value.isNegative()) {
+			throw new IllegalArgumentException(name + " must be a positive duration");
+		}
 	}
 
 }

@@ -9,4 +9,10 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  */
 @ConfigurationProperties("triaxis.web.metrics")
 public record MetricsProperties(@DefaultValue("metrics") String username, String password) {
+
+	@Override
+	public String toString() {
+		return "MetricsProperties[username=" + username + ", password=***]";
+	}
+
 }
