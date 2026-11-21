@@ -5,6 +5,7 @@ import dev.triaxis.assistant.application.port.out.LlmPort;
 import dev.triaxis.assistant.infrastructure.adapter.out.llm.ResilientLlmAdapter;
 import dev.triaxis.assistant.infrastructure.adapter.out.llm.gemini.GeminiLlmAdapter;
 import dev.triaxis.assistant.infrastructure.adapter.out.llm.mock.MockLlmAdapter;
+import io.github.resilience4j.bulkhead.BulkheadRegistry;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.ai.chat.model.ChatModel;
@@ -45,9 +46,9 @@ class LlmConfiguration {
 
 	@Bean
 	@Primary
-	LlmPort resilientLlm(@Qualifier(PROVIDER) LlmPort provider, CircuitBreakerRegistry breakers, MeterRegistry meters,
-			LlmProperties properties) {
-		return new ResilientLlmAdapter(provider, breakers.circuitBreaker(BREAKER), meters,
+	LlmPort resilientLlm(@Qualifier(PROVIDER) LlmPort provider, CircuitBreakerRegistry breakers,
+			BulkheadRegistry bulkheads, MeterRegistry meters, LlmProperties properties) {
+		return new ResilientLlmAdapter(provider, breakers.circuitBreaker(BREAKER), bulkheads.bulkhead(BREAKER), meters,
 				properties.timeout().embedding(), properties.timeout().answer());
 	}
 

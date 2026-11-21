@@ -6,6 +6,7 @@ import dev.triaxis.assistant.infrastructure.adapter.out.llm.mock.MockLlmAdapter;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.embedding.EmbeddingModel;
+import io.github.resilience4j.bulkhead.BulkheadRegistry;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -20,6 +21,7 @@ class LlmConfigurationTest {
 	private final ApplicationContextRunner runner = new ApplicationContextRunner()
 			.withUserConfiguration(LlmConfiguration.class)
 			.withBean(CircuitBreakerRegistry.class, CircuitBreakerRegistry::ofDefaults)
+			.withBean(BulkheadRegistry.class, BulkheadRegistry::ofDefaults)
 			.withBean(MeterRegistry.class, SimpleMeterRegistry::new);
 
 	@Test
