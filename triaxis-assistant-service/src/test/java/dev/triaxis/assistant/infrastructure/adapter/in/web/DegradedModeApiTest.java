@@ -35,7 +35,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * is a 503, the breaker opens after five failures and then the provider is not called anymore. Its own context,
  * because the provider is replaced.
  */
-@SpringBootTest(properties = {"assistant.llm.provider=failing-test-provider", "spring.test.webtestclient.timeout=30s"})
+@SpringBootTest(properties = {"assistant.llm.provider=failing-test-provider",
+		"resilience4j.ratelimiter.configs.question.limit-for-period=100000", "spring.test.webtestclient.timeout=30s"})
 @AutoConfigureWebTestClient
 @Import({TestcontainersConfiguration.class, TestSecurityConfiguration.class, DegradedModeApiTest.FailingProvider.class})
 class DegradedModeApiTest {

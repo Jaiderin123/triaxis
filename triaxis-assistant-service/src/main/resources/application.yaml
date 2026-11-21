@@ -143,6 +143,18 @@ assistant:
 # Circuit breaker of the language model calls (ADR 0004): it opens when half of the last ten calls failed (at
 # least five calls), stays open 30 seconds, then lets three trial calls through.
 resilience4j:
+  # Limits of the clinical assistant (ADR 0025): questions per user and calls to the provider in flight.
+  ratelimiter:
+    configs:
+      question:
+        limit-for-period: ${ASSISTANT_QUESTIONS_PER_MINUTE:10}
+        limit-refresh-period: 1m
+        timeout-duration: 0s
+  bulkhead:
+    instances:
+      llm:
+        max-concurrent-calls: ${ASSISTANT_LLM_MAX_CONCURRENT_CALLS:4}
+        max-wait-duration: 0ms
   circuitbreaker:
     instances:
       llm:
