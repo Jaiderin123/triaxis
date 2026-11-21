@@ -15,6 +15,15 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 public record CorpusProperties(@DefaultValue("classpath:/protocols/") String location, @DefaultValue Retry retry) {
 
 	public record Retry(@DefaultValue("PT2S") Duration initialBackoff, @DefaultValue("PT1M") Duration maxBackoff) {
+
+		public Retry {
+			LlmProperties.requirePositive("assistant.corpus.retry.initial-backoff", initialBackoff);
+			LlmProperties.requirePositive("assistant.corpus.retry.max-backoff", maxBackoff);
+			if (maxBackoff.compareTo(initialBackoff) < 0) {
+				throw new IllegalArgumentException("assistant.corpus.retry.max-backoff must not be shorter than the initial back-off");
+			}
+		}
+
 	}
 
 }

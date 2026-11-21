@@ -143,6 +143,10 @@ class UrgencyViewListenerTest {
 	@Test
 	void aViewLostWhileRunningIsRebuiltAtTheNextRestart() throws Exception {
 		send(UUID.randomUUID(), EventType.PACIENTE_REGISTRADO, EventLevel.NO_URGENTE);
+		// Start from a view rebuilt from the topic only: other tests of the shared context write to Redis directly,
+		// and those writes are not in the topic, so they would never come back in the rebuilt view.
+		restartWithAnEmptyRedis();
+		await("the replay", () -> view().active().get(TriageLevel.NOT_URGENT) > 0);
 		UrgencyView before = settled();
 		assertThat(before.active().get(TriageLevel.NOT_URGENT)).isPositive();
 
