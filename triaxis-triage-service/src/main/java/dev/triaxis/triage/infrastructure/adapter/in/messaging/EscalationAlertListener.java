@@ -46,7 +46,7 @@ class EscalationAlertListener {
 
 	private static final Logger log = LoggerFactory.getLogger(EscalationAlertListener.class);
 
-	/** Time left for the two database statements of one event, on top of the worst case of the channel. */
+	/** Time left for the three database statements of one event, on top of the worst case of the channel. */
 	private static final Duration STORE_MARGIN = Duration.ofSeconds(30);
 
 	private final NotifyEscalationUseCase alerts;

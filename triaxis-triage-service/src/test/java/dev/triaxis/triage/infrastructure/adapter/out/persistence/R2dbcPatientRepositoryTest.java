@@ -54,6 +54,19 @@ class R2dbcPatientRepositoryTest {
 				.verifyComplete();
 	}
 
+	/** A system clock moved back between the registration and the consultation never gives a negative wait. */
+	@Test
+	void theConsultationNeverStartsBeforeTheRegistration() {
+		Patient patient = PersistenceTestSupport.newPatient();
+		repository.save(patient).block();
+		Instant before = patient.registeredAt().minusSeconds(30);
+
+		StepVerifier.create(repository.updateStatus(patient.id(), PatientStatus.REGISTERED,
+						PatientStatus.IN_CONSULTATION, before))
+				.assertNext(updated -> assertThat(updated.consultationStartedAt()).isEqualTo(patient.registeredAt()))
+				.verifyComplete();
+	}
+
 	@Test
 	void directDischargeLeavesNoConsultationTime() {
 		Patient patient = PersistenceTestSupport.newPatient();
