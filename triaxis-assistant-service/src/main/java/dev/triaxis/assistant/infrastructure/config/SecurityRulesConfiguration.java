@@ -5,7 +5,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
 
-/** Role rules of the assistant endpoints; everything else just needs a valid token. */
+/** Role rules of the assistant endpoints; any other route is denied (deny by default, ADR 0022). */
 @Configuration
 class SecurityRulesConfiguration {
 
