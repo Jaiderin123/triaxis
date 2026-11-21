@@ -324,10 +324,11 @@ A1 to A4 come from `ARCHITECTURE.md` section 6.2. A5 onward were added while pre
 - **Decision:** one AKS node, one replica of each service, and PostgreSQL, Kafka and Redis in the cluster on single persistent volumes, with no backups. The cluster is stopped outside the demonstrations and the resource group is deleted when the evaluation ends (ADR 0010).
 - **Why:** it shows the system running on Kubernetes at the lowest cost; high availability would multiply the nodes and the managed services.
 - **Impact if wrong:** a lost node or volume loses the data, and a stopped cluster does not answer until it is started. Moving to managed services changes the connection settings only.
+- **Risks accepted for the demonstration** (review of 2026-11-21, listed in PLAN "Improvements"): no NetworkPolicy, so any pod reaches PostgreSQL, Kafka and Redis (Kafka without authentication); the API server of AKS is public, without authorized IP ranges, and uses its local admin account; the Redis password is an argument of its process. Traefik, the only pod exposed to the internet, can read the Secrets of the namespace `triaxis` (its Ingress provider loads no route without them), but no longer those of other namespaces.
 
 ## A48. Public address of the deployment
 
 - **Ambiguity:** "a reachable URL" does not say which host name or whether it uses TLS.
-- **Decision:** the host name is the free DNS label of the public IP in Azure (`<label>.<region>.cloudapp.azure.com`), served over HTTPS with a Let's Encrypt certificate from cert-manager. The paths are those of the local run (`/auth`, `/.well-known/jwks.json`, `/triage`, `/asistente`); `/actuator` is not public. The issuer of the tokens stays `triaxis-auth` (a name, not an address), and the services read the JWKS from auth inside the cluster (`AUTH_JWKS_URI`), without leaving it.
+- **Decision:** the host name is the free DNS label of the public IP in Azure (`<label>.<region>.cloudapp.azure.com`), served over HTTPS with a Let's Encrypt certificate that Traefik obtains itself (HTTP-01, revision of ADR 0010). The paths are those of the local run (`/auth`, `/.well-known/jwks.json`, `/triage`, `/asistente`); `/actuator` is not public. The issuer of the tokens stays `triaxis-auth` (a name, not an address), and the services read the JWKS from auth inside the cluster (`AUTH_JWKS_URI`), without leaving it.
 - **Why:** the tokens must not travel in clear over the internet, and no domain has to be bought.
 - **Impact if wrong:** a custom domain is a change of the overlay and the certificate only.

@@ -14,7 +14,7 @@ The assistant depends on an external language model provider for embeddings and 
 - Every call has a timeout (embedding 5 seconds, answer 20 seconds); a timeout counts as a failure. The breaker counts the last ten calls and opens when half of them failed (at least five calls), stays open 30 seconds and then lets three trial calls through. All values are properties.
 - Any provider failure, a timeout or an open breaker becomes a 503 in the shared RFC 7807 format, with `Retry-After: 30` and the detail "The clinical assistant is temporarily unavailable". The fallback never contains generated or clinical text.
 - An answer that is not the expected JSON is not a provider failure: it is a successful call whose content is rejected by the citation check (ADR 0007), so it does not open the breaker.
-- A question without a relevant protocol is answered with the fixed notice before any model call, so it keeps working while the provider is down.
+- A question without a relevant protocol is answered with the fixed notice without calling the chat model. It still needs the embedding of the question from the same provider and through the same breaker, so while the provider is down, or the breaker is open, it gets the 503 too (without clinical content).
 - The corpus is validated at startup, and its embedding is retried in the background; until it is ready, questions get the same 503 (ASSUMPTIONS A37).
 - No retry of the answer call: a retry doubles the wait and the cost of a request that is already slow, and the breaker protects the provider better.
 - Metrics: `assistant.llm.latency` (tags `operation` and `outcome`), `assistant.answers` with outcome `degraded`, and the breaker state from Resilience4j.

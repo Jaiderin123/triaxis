@@ -17,7 +17,7 @@ Working checklist. Follow the phases in order; tick boxes as work lands. Source 
 | 6 Operation report | done | `phase-6-report` |
 | 7 Alerts | done | `phase-7-alerts` |
 | 8 Deployment | done | `phase-8-deployment` |
-| 9 Docs | pending | |
+| 9 Docs | done | `phase-9-docs` |
 
 ### Definition of done for phases 6 to 9 (engineering rules of the review of 2026-11-19)
 
@@ -33,16 +33,14 @@ Every pull request of phases 6 to 9 checks, in addition to the build and `script
 - [ ] Read models and markers use keys of their own; the replica assumptions of a background process are stated.
 - [ ] A fresh clone of the branch compiles.
 
-### Where to resume (phase 8)
+### Where to resume (after the delivery)
 
-State on 2026-11-20: phases 0 to 7 are released to `main` (tags up to `phase-7-alerts`). Phase 8 is in progress on `feat/phase-8-deployment` (delivery on 2026-11-21). Part A is done and verified: the shared Dockerfile, `docker compose up --build` with the sample flow, and the manifests on kind with the sample flow through the Ingress. Part B is deployed on 2026-11-20: https://triaxis-demo.eastus2.cloudapp.azure.com answers the sample flow over HTTPS with a Let's Encrypt certificate, including a question to Gemini with its citation (PROTO-002); the demo passwords are refused there. The first apply found two defects, fixed in the `aks` overlay: it had no namespace, so the ACME volume was created in `default`, and the `fsGroup` of Traefik left `acme.json` at mode 660, which Traefik refuses, so an init container resets it to 600. `deploy.sh` was fixed afterwards: it pushes the images and checks that they can be pulled anonymously before Terraform, plans, asks for a confirmation (`--yes` skips it) and applies that plan, then waits for HTTPS and restarts Traefik once if the first ACME challenge timed out. The Azure scripts select the AKS kubectl context themselves, `destroy.sh` asks first, and the node pool declares the upgrade settings that AKS sets, so a plan on the deployed cluster shows no change. `stop.sh` is verified. Not done yet: `start.sh` and the check of the budget alert. Before the deployment, part B was checked without Azure (Terraform `validate`; the `aks` overlay accepted by a server-side dry run on kind; the redirect to HTTPS tested on a Traefik pod in kind, which showed that redirecting to the `websecure` entry point leaks its container port 8443, so it redirects to `:443`)).
+State on 2026-11-21: phases 0 to 9 are released to `main` (tags up to `phase-9-docs`). The deployment runs version `0.9.0` at https://triaxis-demo.eastus2.cloudapp.azure.com with nine sample patients; the credentials of `nurse` and `doctor` are in `~/.config/triaxis/deploy.env` and are handed over with the delivery.
 
-Next, on the evening of 2026-11-20 (the owner of the project runs or approves every step on Azure):
-1. Done on 2026-11-20: the resource providers are registered (`Microsoft.ContainerService`, `Compute`, `Network`, `Storage`); in `eastus2` the quota is 4 vCPU and 3 public IP addresses, and the DNS label `triaxis-demo` is free. No B-series size is offered to the subscription, so the node is `Standard_D2as_v7` (approved, see the revision of ADR 0010). `terraform.tfvars` and `~/.config/triaxis/deploy.env` exist (both git-ignored or outside the repository).
-2. Done: `~/.config/triaxis/ghcr.env` exists (the token of the gh CLI with `write:packages`), the images `0.8.0` are pushed and public.
-3. Done: the saved plan was applied by hand (`terraform apply triaxis.tfplan`, then the Secret, the overlay and the wait of `deploy.sh`), the sample flow passed over HTTPS and the URL is in the README. The fixes of `deploy.sh` are done (it was run up to its confirmation, with no change to apply).
-4. `deploy/azure/stop.sh` until the delivery; start it when the repository is handed in and keep it running during the review window; `destroy.sh` at the end.
-5. Then the pull requests (phase 8 to `develop` and `main`, tag `phase-8-deployment`) and phase 9 (docs).
+Next:
+1. The owner checks the system as a reviewer would (a fresh clone with `docker compose up --build`, then the deployed API).
+2. Keep the cluster running during the review window (`deploy/azure/start.sh` if it was stopped), and run `deploy/azure/destroy.sh` when the evaluation ends.
+3. After the delivery: the items of "Improvements", starting with the database roles of ADR 0024 and the NetworkPolicy.
 
 - Conventions: the definition of done of phases 6 to 9 above; no secrets in the repository (the Terraform state and `terraform.tfvars` are git-ignored); check that a fresh clone compiles.
 - Documentation sync: follow the checklist in `CLAUDE.md` and run `scripts/check-docs.sh` before each pull request.
@@ -357,10 +355,10 @@ First commit: `build: add Dockerfiles, compose and Kubernetes manifests`
 **Goal:** README and ADRs ready for a reader who has never seen the project.
 
 Tasks
-- [ ] README: one-command run, architecture diagram, stack, API overview, decisions, testing, deployment, author
-- [ ] ADRs: at least 0001, 0002, 0006, 0007 (priority), then the rest of the plan in `ARCHITECTURE.md` section 14
-- [ ] Link `ASSUMPTIONS.md` from the README; confirm the assumptions still match the code
-- [ ] Final check that no secret or private file is in the repository or its history
+- [x] README: one-command run, architecture diagram, stack, API overview, decisions, testing, deployment, author
+- [x] ADRs: at least 0001, 0002, 0006, 0007 (priority), then the rest of the plan in `ARCHITECTURE.md` section 14
+- [x] Link `ASSUMPTIONS.md` from the README; confirm the assumptions still match the code
+- [x] Final check that no secret or private file is in the repository or its history
 
 Definition of done: a fresh clone runs with `docker compose up --build` following only the README.
 
@@ -619,14 +617,54 @@ One entry per finished piece of work: what was done, decisions taken, how it was
   - Afterwards the data was reset and nine sample patients were loaded.
 - **Pull requests:** #44 (to `develop`), #45 (to `main`), then `fix/deploy-script` for the scripts.
 
+### Phase 9: Docs and final review (done)
+
+- **What:**
+  - README completed: the architecture with a diagram, the stack, a map of the requirements, the key decisions with their reasons, and the testing section with the measured results (533 tests, line coverage 94 to 97 % per module).
+  - The decisions that were open in ARCHITECTURE section 13 are marked as decided, and the 46 assumptions are confirmed to have a decision, a reason and an impact.
+  - The deployment runs version `0.9.0` with the fixes below.
+- **Final review** (three reviewers; no critical or high finding; the report is outside the repository):
+  - Security:
+    - Traefik watches only the namespace `triaxis`, with a Role. Verified on kind: its Ingress provider loads no route without listing the Secrets of that namespace, so it can still read them, but no longer those of other namespaces.
+    - The pods of PostgreSQL, Kafka, Redis and the topic Job use the seccomp profile of the runtime, no privilege escalation and no service account token.
+    - `MetricsProperties`, `TokenResponse` and `IssuedToken` hide their secrets in `toString`.
+  - Assistant:
+    - the urgency view answers 503 with `Retry-After` when Redis does not answer (it answered 500);
+    - two tests no longer depend on the order of execution;
+    - the timeouts and back-offs are validated;
+    - ADR 0004 now says that a question without a protocol also gets the 503 while the provider is down (it needs the embedding).
+  - Triage:
+    - the consultation never starts before the registration, so a clock moved back cannot break the report;
+    - ArchUnit forbids the system clock in the core and annotated controllers, in the three services.
+  - Docs:
+    - A48 no longer says cert-manager;
+    - ADR 0020 records that the network policies are deferred;
+    - the property `triage.report.timeout` is documented in ARCHITECTURE section 10.
+  - Deferred (below and A47): NetworkPolicy, authorized IP ranges of the API server, the Redis password in a file, and the alert listener of triage when the database does not answer.
+- **Verification:**
+  - `./gradlew build` passes (533 tests).
+  - On kind: the degraded mode with an invalid Gemini key (503 with `Retry-After`, the breaker open after a few calls, the urgency view still 200, recovery with the real key), and Redis stopped (the view answers 503 after its 2 s timeout, triage keeps working, recovery afterwards).
+  - On AKS: version `0.9.0` rolled out with no restart; the certificate and the data are kept; Traefik cannot list the Secrets of `kube-system`.
+  - The git history has no key or token, and `docs/private` was never committed.
+- **Pull requests:** `feat/phase-9-docs` to `develop`, then `develop` to `main`, tag `phase-9-docs`.
+
 ## Improvements (out of scope for now)
+
+From the final review of 2026-11-21 (deployment and code), deferred so the deployed cluster is not rebuilt the night before the delivery:
+- NetworkPolicy: `network_policy = "azure"` (or Cilium) in Terraform, which recreates the cluster, and a deny-all ingress policy per namespace with the allowed flows: Traefik to the services, the services to PostgreSQL, Kafka and auth, the assistant to Redis.
+- Authorized IP ranges for the API server of AKS, local accounts disabled and Entra ID RBAC.
+- The Redis password from a configuration file mounted from the Secret, instead of an argument of the process.
+- The alert listener of triage blocks the consumer thread while the database does not answer (`inFlight.acquire()` with endless retries): pause the container instead, as for the urgency listener; tests for its in-flight limit and its timeout per event.
+- The escalation rule of `Patient` is only used by the fake store of the tests, while the real rule is the SQL; a test that compares both on the same data.
+- The published counter of the outbox counts sends, not committed events; the relay reads `OffsetDateTime.now` instead of the clock port; a non-canonical UUID answers 404 instead of 400.
+- When the model answers `noProtocol: false` with a "no protocol" text and a valid citation, the answer is kept.
 
 Ideas that were consciously left out of the first delivery:
 
 Moved out of phase 8 on 2026-11-20 to keep the delivery on time (revision of ADR 0010):
 
 - Database roles (ADR 0024, accepted): an owner role applies the schema in a separate step (a Job, a one-shot compose service) and each service runs with a least-privilege role and `spring.sql.init.mode: never`; the runtime role of triage only has `INSERT` and `SELECT` on `patient_audit` (ADR 0014). Today the services use the superuser of the PostgreSQL container.
-- Rate limit of the token endpoint behind the Ingress (review finding A2): count only failed attempts, check the address before the username, set `server.forward-headers-strategy` explicitly and trust only the forwarded address of the Ingress (A28, ADR 0020). Behind Traefik every client shares the address of the proxy, so the limit per address is global.
+- Rate limit of the token endpoint behind the Ingress (review finding A2): count only failed attempts, check the address before the username, set `server.forward-headers-strategy` explicitly and trust only the forwarded address of the Ingress (A28, ADR 0020). On kind every client shares the address of the proxy, so the limit per address is global; on AKS Spring Boot may already resolve the address from `X-Forwarded-For` (it detects Kubernetes, and `externalTrafficPolicy: Local` keeps the client address), which is not verified. Setting the strategy explicitly removes the doubt.
 - auth logs a warning when it starts without users.
 
 From the review of 2026-11-19 (report in `docs/private/reviews/`, not versioned), accepted as debt:
